@@ -1,0 +1,33 @@
+# ocx — cấu hình model cho OpenCode
+# Copy file này thành ~/.config/ocx/models.conf rồi sửa.
+#
+# Model ID phải khớp với `opencode models` hoặc màn hình /models.
+# File này được source bởi Bash; chỉ sửa bằng nội dung tin cậy.
+
+# Model chính.
+OCX_MODEL_PRIMARY="opencode/deepseek-v4.1-flash-free"
+
+# Các model dự phòng hợp lệ (bạn có quyền dùng). Đây là model free của
+# OpenCode tại thời điểm tạo file; danh sách có thể thay đổi.
+OCX_MODEL_FALLBACKS=(
+  "opencode/glm-5.3-flash-free"
+  "opencode/mimo-v2.6-flash-free"
+  "opencode/nemotron-3.5-lightning-free"
+  "opencode/big-pickle"
+)
+
+# Alias ngắn để gõ nhanh. Có thể thêm provider khác nếu đã /connect.
+declare -A OCX_MODEL_ALIASES=(
+  ["primary"]="$OCX_MODEL_PRIMARY"
+  ["glm"]="opencode/glm-5.3-flash-free"
+  ["mimo"]="opencode/mimo-v2.6-flash-free"
+  ["nemotron"]="opencode/nemotron-3.5-lightning-free"
+  ["bigpickle"]="opencode/big-pickle"
+
+  # Ví dụ fallback sang provider khác đã kết nối:
+  # ["or"]="openrouter/google/gemini-3-flash-preview"
+  # ["ollama"]="ollama/qwen3-coder:7b"
+)
+
+# Thứ tự fallback. Alias "primary" luôn đứng đầu.
+OCX_MODEL_ORDER=(primary glm mimo nemotron bigpickle)

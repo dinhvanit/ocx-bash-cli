@@ -1,0 +1,45 @@
+# ocx — cấu hình chung
+# Copy file này thành ~/.config/ocx/ocx.conf rồi sửa nếu cần.
+# Đây là file Bash được source; chỉ dùng nội dung tin cậy.
+
+# Thời gian chờ tunnel lên và chờ lấy IPv4 public (giây).
+OCX_CONNECT_TIMEOUT=60
+OCX_IP_TIMEOUT=30
+
+# ask = dùng sudo (hỏi mật khẩu khi cần), none = chạy trực tiếp (chỉ khi
+# bạn đã cấu hình quyền phù hợp, ví dụ chạy ocx bằng root).
+OCX_SUDO=ask
+
+# Tự thử profile kế tiếp khi profile hiện tại lỗi.
+OCX_FAILOVER=1
+
+# 1 = không nối nếu phát hiện OpenVPN khác đang chạy (tránh chồng tunnel).
+# ocx không tự kill process OpenVPN ngoài state/pidfile của nó.
+OCX_CHECK_UNMANAGED_VPN=1
+
+# 1 = coi việc IP public không đổi là thất bại. Mặc định 0 vì một số
+# mạng/CGNAT có thể cho IP trùng; chỉ bật khi bạn chắc chắn.
+OCX_REQUIRE_IP_CHANGE=0
+
+# next | random | auto (chỉ là gợi ý mặc định cho các lệnh có mode).
+OCX_ROTATE_MODE=next
+
+# Cache danh sách `opencode models` (giây).
+OCX_MODELS_CACHE_TTL=300
+
+# 1 = cho phép `ocx run --fallback` đổi model khi gặp 429 (rate limit).
+# Mặc định 0 vì 429 thường chỉ là giới hạn tạm thời, không phải hết quota.
+OCX_RUN_FALLBACK_ON_RATE_LIMIT=0
+
+# Các endpoint kiểm tra IPv4 public. ocx thử lần lượt.
+OCX_HEALTH_URLS=(
+  "https://api.ipify.org"
+  "https://ifconfig.me/ip"
+  "https://icanhazip.com"
+  "https://ipinfo.io/ip"
+)
+
+# Có thể override thư mục nếu muốn:
+# OCX_VPN_DIR="$HOME/.config/ocx/vpn"
+# OCX_WG_DIR="$HOME/.config/ocx/wireguard"
+# OCX_LOG_DIR="$HOME/.cache/ocx/log"

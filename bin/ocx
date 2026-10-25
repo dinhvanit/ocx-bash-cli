@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# ocx-bash-cli — OpenCode eXtended CLI
+# Quản lý model fallback cho OpenCode và profile VPN (OpenVPN / WireGuard).
+#
+# Nguyên tắc:
+#   - VPN là công cụ quản lý kết nối, KHÔNG dùng để né quota dịch vụ.
+#   - Chỉ chuyển model/provider mà bạn có quyền sử dụng.
+#   - Không tự replay prompt nếu model đã thực hiện tool call.
+set -Eeuo pipefail
+
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+BASE_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+LIB_DIR="${OCX_LIB_DIR:-$BASE_DIR/lib}"
+
+# shellcheck source=../lib/common.sh
+source "$LIB_DIR/common.sh"
+# shellcheck source=../lib/vpn.sh
+source "$LIB_DIR/vpn.sh"
+# shellcheck source=../lib/models.sh
+source "$LIB_DIR/models.sh"
+
+vpn_dispatch() {
+  local sub="${1:-help}"
+  shift || true
+  case "$sub" in
+    list)        vpn_list "$@" ;;
+    regions)     vpn_regions "$@" ;;
+    import)      vpn_import "$@" ;;
+    use)         with_lock vpn_use "$@" ;;
+    next|rotate) with_lock vpn_next "$@" ;;
+    random)      with_lock vpn_random "$@" ;;
+    region|use-region) with_lock vpn_region "$@" ;;
+    auto)        with_lock vpn_auto "$@" ;;
+    test)        with_lock vpn_test "$@" ;;
+    status)      vpn_status "$@" ;;
+    disconnect|stop) with_lock vpn_disconnect "$@" ;;
+    log|logs)    vpn_log "$@" ;;
+    help|-h|--help) vpn_help ;;
+    *) usage_vpn; die "lệnh vpn không xác định: $sub" ;;
+  esac
+}
+
+model_dispatch() {
+  local sub="${1:-help}"
+  shift || true
+  case "$sub" in
+    list)    models_cmd "$@" ;;
+    current|status) model_current "$@" ;;
+    switch|use) model_switch "$@" ;;
+    next|auto|fallback) model_next "$@" ;;
+    help|-h|--help) model_help ;;
+    *) usage_model; die "lệnh model không xác định: $sub" ;;
+  esac
+}
+
+main() {
+  local cmd="${1:-help}"
+  shift || true
+
+  case "$cmd" in
+    start)   load_config; model_start "$@" ;;
+    tui)     load_config; require_cmd "$OPENCODE_BIN"; exec "$OPENCODE_BIN" "$@" ;;
+    run)     load_config; model_run "$@" ;;
+    models)  load_config; models_cmd "$@" ;;
+    model)   load_config; model_dispatch "$@" ;;
+    fallback) load_config; model_next "$@" ;;
+    vpn)     load_config; vpn_dispatch "$@" ;;
+    doctor)  load_config; doctor "$@" ;;
+    version|-V|--version) version ;;
+    help|-h|--help) usage_common ;;
+    *)
+      usage_common
+      die "lệnh không xác định: $cmd"
+      ;;
+  esac
+}
+
+main "$@"

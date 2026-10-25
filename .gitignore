@@ -1,0 +1,75 @@
+# ---------------------------------------------------------------------------
+# VPN profiles, certificate, và private key — tuyệt đối không commit
+# ---------------------------------------------------------------------------
+*.ovpn
+*.conf
+!*.conf.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.csr
+*.der
+*.secret
+*.secrets
+auth.txt
+auth-user-pass.txt
+
+# Thư mục staging profile: chỉ giữ README hướng dẫn
+vpn-profiles/**
+!vpn-profiles/README.md
+
+# ---------------------------------------------------------------------------
+# Credentials / biến môi trường
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+credentials
+credentials.*
+*password*
+*token*
+*apikey*
+*api-key*
+
+# ---------------------------------------------------------------------------
+# State, cache, log, PID do ocx sinh ra
+# ---------------------------------------------------------------------------
+*.log
+*.tsv
+*.state
+*.pid
+*.lock
+*.tmp
+*.bak
+*~
+.ocx/
+state/
+cache/
+
+# ---------------------------------------------------------------------------
+# OpenCode local config (có thể chứa provider/credential)
+# ---------------------------------------------------------------------------
+.opencode/
+opencode.json
+opencode.jsonc
+
+# ---------------------------------------------------------------------------
+# Test / build / editor / OS
+# ---------------------------------------------------------------------------
+tmp/
+tests/tmp/
+dist/
+build/
+coverage/
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.direnv/
+*.swp
+*.swo
