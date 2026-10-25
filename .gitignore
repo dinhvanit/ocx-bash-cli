@@ -16,8 +16,11 @@
 auth.txt
 auth-user-pass.txt
 
-# Thư mục staging profile: chỉ giữ README hướng dẫn
+# Thư mục chứa profile VPN: giữ cấu trúc region và .gitkeep,
+# nhưng ignore toàn bộ file profile/credential bên trong.
 vpn-profiles/**
+!vpn-profiles/**/
+!vpn-profiles/**/.gitkeep
 !vpn-profiles/README.md
 
 # ---------------------------------------------------------------------------

@@ -26,6 +26,11 @@ ocx-bash-cli/
 │   ├── ocx.conf.example
 │   └── models.conf.example
 ├── completions/ocx.bash
+├── vpn-profiles/               # kho profile theo region (nội dung bị ignore)
+│   ├── README.md
+│   ├── jp/.gitkeep
+│   ├── vn/.gitkeep
+│   └── ...
 ├── tests/run-tests.sh
 ├── install.sh
 ├── uninstall.sh
@@ -191,6 +196,15 @@ ocx vpn import ~/Downloads/wg-us.conf --region us
 Nếu không truyền `--region`, `ocx` cố suy ra từ tên thư mục hoặc tên file
 (`vpn_vn` → `vn`, `japan` → `jp`, `us-01` → `us`). Nếu không chắc, hãy truyền
 `--region`.
+
+Trong dự án có sẵn thư mục `vpn-profiles/<region>/` để lưu bản sao profile.
+Các file `.ovpn`/`.conf` trong đó bị `.gitignore` chặn; chỉ `.gitkeep` và
+`README.md` được commit. Import từ kho này:
+
+```bash
+ocx vpn import vpn-profiles/jp --region jp
+ocx vpn import vpn-profiles/vn --region vn
+```
 
 ### 5.2 Xem danh sách
 

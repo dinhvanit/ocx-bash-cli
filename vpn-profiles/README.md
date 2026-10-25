@@ -1,24 +1,83 @@
-# vpn-profiles (thư mục staging)
+# vpn-profiles — kho profile VPN trong dự án
 
-Đây chỉ là thư mục mẫu để bạn để tạm file `.ovpn`/`.conf` trước khi import.
-`ocx` **không** đọc trực tiếp thư mục này.
+Thư mục này chứa bản sao profile VPN để quản lý tập trung trong dự án.
 
-Import vào cấu hình thật:
+- `.gitkeep` được commit để giữ cấu trúc thư mục region.
+- Toàn bộ file `.ovpn`, `.conf`, certificate, key và credential bên trong
+  **bị ignore**, không được đưa lên GitHub.
+- File profile thật nằm trên máy bạn, quyền `600`.
 
-```bash
-ocx vpn import ./vpn-profiles/vn-01.ovpn --region vn
-ocx vpn import ./vpn-profiles/jp-01.ovpn --region jp
-ocx vpn import ./vpn-profiles/us-01.conf --region us
+## Cấu trúc
+
+```text
+vpn-profiles/
+├── README.md
+├── ae/.gitkeep          # united_arab_emirates (chưa có file)
+├── ca/                  # canada
+├── gb/                  # wales / United Kingdom
+├── id/                  # indonesia
+├── jp/                  # japan
+├── kr/                  # korea
+├── misc/                # profile lỗi/không xác định region
+├── ru/                  # russian_federation
+├── th/                  # thailand
+├── us/.gitkeep          # united_state (chưa có file)
+└── vn/                  # vietnam
 ```
 
-Sau khi import:
+Mỗi thư mục region có một `.gitkeep`; các file `.ovpn` nằm cạnh đó nhưng bị
+`.gitignore` chặn.
 
-- OpenVPN: `~/.config/ocx/vpn/<region>/<name>.ovpn`
-- WireGuard: `~/.config/ocx/wireguard/<region>/<name>.conf`
+## Import vào ocx
 
-Kiểm tra:
+`ocx` không đọc trực tiếp thư mục này. Hãy import vào cấu hình thật:
+
+```bash
+# Một region
+ocx vpn import vpn-profiles/jp --region jp
+ocx vpn import vpn-profiles/vn --region vn
+
+# Tất cả region (ocx tự suy ra region từ tên thư mục)
+ocx vpn import vpn-profiles
+
+# File lẻ
+ocx vpn import vpn-profiles/jp/ten-file.ovpn --region jp
+```
+
+Sau đó kiểm tra:
 
 ```bash
 ocx vpn list
 ocx vpn regions
 ```
+
+Profile được copy vào:
+
+```text
+~/.config/ocx/vpn/<region>/
+~/.config/ocx/wireguard/<region>/
+```
+
+## Thêm region mới
+
+```bash
+mkdir -p vpn-profiles/de
+touch vpn-profiles/de/.gitkeep
+# copy file .ovpn vào vpn-profiles/de/
+ocx vpn import vpn-profiles/de --region de
+```
+
+## Kiểm tra không commit nhầm profile
+
+```bash
+git status --short
+git check-ignore -v vpn-profiles/jp/*.ovpn
+git check-ignore -v vpn-profiles/jp/.gitkeep
+```
+
+Kết quả đúng:
+
+- file `.ovpn` bị ignore;
+- file `.gitkeep` **không** bị ignore.
+
+Không dùng `git add -f vpn-profiles/**/*.ovpn`.

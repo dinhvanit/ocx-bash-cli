@@ -11,7 +11,7 @@ normalize_region() {
   case "$r" in
     vn|vietnam|viet-nam|viet) printf 'vn' ;;
     jp|japan|nippon)         printf 'jp' ;;
-    us|usa|america|united-states|united_states) printf 'us' ;;
+    us|usa|america|united-state|united_state|united-states|united_states) printf 'us' ;;
     sg|singapore)            printf 'sg' ;;
     kr|korea|south-korea|south_korea) printf 'kr' ;;
     tw|taiwan)               printf 'tw' ;;
@@ -20,13 +20,15 @@ normalize_region() {
     my|malaysia)             printf 'my' ;;
     id|indonesia)            printf 'id' ;;
     ph|philippines)          printf 'ph' ;;
-    gb|uk|united-kingdom|britain) printf 'gb' ;;
+    gb|uk|united-kingdom|united_kingdom|britain|wales) printf 'gb' ;;
     de|germany)              printf 'de' ;;
     fr|france)               printf 'fr' ;;
     nl|netherlands)          printf 'nl' ;;
     ca|canada)               printf 'ca' ;;
     au|australia)            printf 'au' ;;
     in|india)                printf 'in' ;;
+    ru|russia|russian-federation|russian_federation) printf 'ru' ;;
+    ae|uae|united-arab-emirates|united_arab_emirates) printf 'ae' ;;
     vpngate|vpngate-public|public|public-vpn|opengw) printf 'misc' ;;
     *)                       printf '%s' "${r:-misc}" ;;
   esac
@@ -696,7 +698,7 @@ vpn_import() {
       srcdir="$(dirname "$file")"
       region="$(normalize_region "$(basename "$srcdir")")"
       case "$region" in
-        vn|jp|us|sg|kr|tw|hk|th|my|id|ph|gb|de|fr|nl|ca|au|in) ;;
+        vn|jp|us|sg|kr|tw|hk|th|my|id|ph|gb|de|fr|nl|ca|au|in|ru|ae) ;;
         # Tên thư mục không phải vùng đã biết: thử suy ra từ tên file.
         *) region="$(region_from_filename "$base")" ;;
       esac
