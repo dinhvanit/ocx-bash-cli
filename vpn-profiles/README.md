@@ -13,14 +13,20 @@ Thư mục này chứa bản sao profile VPN để quản lý tập trung trong 
 vpn-profiles/
 ├── README.md
 ├── ae/.gitkeep          # united_arab_emirates (chưa có file)
+├── au/.gitkeep          # australia
 ├── ca/                  # canada
+├── es/                  # spain
 ├── gb/                  # wales / United Kingdom
 ├── id/                  # indonesia
 ├── jp/                  # japan
 ├── kr/                  # korea
 ├── misc/                # profile lỗi/không xác định region
+├── ph/.gitkeep          # philippines
 ├── ru/                  # russian_federation
+├── sg/.gitkeep          # singapore
 ├── th/                  # thailand
+├── tw/.gitkeep          # taiwan
+├── uk/.gitkeep          # alias United Kingdom -> gb khi import
 ├── us/.gitkeep          # united_state (chưa có file)
 └── vn/                  # vietnam
 ```

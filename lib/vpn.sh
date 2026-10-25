@@ -27,6 +27,7 @@ normalize_region() {
     ca|canada)               printf 'ca' ;;
     au|australia)            printf 'au' ;;
     in|india)                printf 'in' ;;
+    es|spain)                printf 'es' ;;
     ru|russia|russian-federation|russian_federation) printf 'ru' ;;
     ae|uae|united-arab-emirates|united_arab_emirates) printf 'ae' ;;
     vpngate|vpngate-public|public|public-vpn|opengw) printf 'misc' ;;
@@ -67,6 +68,20 @@ region_from_path() {
     return
   fi
   region_from_filename "$(basename "$file")"
+}
+
+# Region của profile đang được ocx quản lý. Dùng cho xoay trong cùng region.
+active_region() {
+  state_load
+  if [[ -n "${ACTIVE_PROFILE:-}" && "$ACTIVE_PROFILE" == */* ]]; then
+    printf '%s' "${ACTIVE_PROFILE%%/*}"
+    return 0
+  fi
+  if [[ -n "${ACTIVE_PATH:-}" ]]; then
+    normalize_region "$(basename "$(dirname "$ACTIVE_PATH")")"
+    return 0
+  fi
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -698,7 +713,7 @@ vpn_import() {
       srcdir="$(dirname "$file")"
       region="$(normalize_region "$(basename "$srcdir")")"
       case "$region" in
-        vn|jp|us|sg|kr|tw|hk|th|my|id|ph|gb|de|fr|nl|ca|au|in|ru|ae) ;;
+        vn|jp|us|sg|kr|tw|hk|th|my|id|ph|gb|de|fr|nl|ca|au|in|es|ru|ae) ;;
         # Tên thư mục không phải vùng đã biết: thử suy ra từ tên file.
         *) region="$(region_from_filename "$base")" ;;
       esac
@@ -764,10 +779,11 @@ vpn_use() {
 }
 
 vpn_next() {
-  local region="" backend="" mode="next" failover="$OCX_FAILOVER"
+  local region="" backend="" mode="next" failover="$OCX_FAILOVER" same_region=0
   while (($#)); do
     case "$1" in
       --region) region="$(normalize_region "${2:-}")"; shift 2 ;;
+      --same-region) same_region=1; shift ;;
       --backend) backend="${2:-}"; shift 2 ;;
       --random) mode="random"; shift ;;
       --no-failover) failover=0; shift ;;
@@ -776,6 +792,14 @@ vpn_next() {
       *) die "tham số không hợp lệ cho vpn next: $1" ;;
     esac
   done
+  if truthy "$same_region"; then
+    [[ -z "$region" ]] || die "không dùng --same-region cùng --region"
+    region="$(active_region 2>/dev/null || true)"
+    [[ -n "$region" ]] || {
+      warn "không có VPN đang được ocx quản lý để xoay trong region"
+      return 1
+    }
+  fi
   [[ -n "$mode" ]] || mode="next"
   connect_sequence "$region" "$backend" "" "$mode" "$failover"
 }

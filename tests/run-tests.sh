@@ -74,10 +74,12 @@ new_env() {
   export OCX_TEST_WG_FILE="$ENV_DIR/wg.up"
   export MOCK_PIDS_FILE="$ENV_DIR/mock.pids"
   export MOCK_MODEL_FILE="$ENV_DIR/model.txt"
+  export MOCK_FREE_LIMIT_FILE="$ENV_DIR/free-limit.count"
   export MOCK_RUN_MODE="${MOCK_RUN_MODE:-normal}"
   mkdir -p "$OCX_CONFIG_DIR/vpn/vn" "$OCX_CONFIG_DIR/vpn/jp" \
            "$OCX_CONFIG_DIR/wireguard/us" "$OCX_CACHE_DIR" "$OCX_STATE_DIR"
   printf '203.0.113.10' > "$OCX_TEST_IP_FILE"
+  rm -f "$OCX_TEST_IP_FILE.counter" "$MOCK_FREE_LIMIT_FILE"
   printf 'opencode/deepseek-v4.1-flash-free' > "$MOCK_MODEL_FILE"
   : > "$MOCK_PIDS_FILE"
   write_config
@@ -141,7 +143,11 @@ if [[ -n "${MOCK_FAIL_PROFILE:-}" && "$config" == *"$MOCK_FAIL_PROFILE"* ]]; the
   printf 'AUTH_FAILED\n' > "$logfile"
   exit 1
 fi
-new="198.51.100.$((RANDOM % 200 + 1))"
+counter_file="${OCX_TEST_IP_FILE}.counter"
+n=$(cat "$counter_file" 2>/dev/null || printf 0)
+n=$((n + 1))
+printf '%s' "$n" > "$counter_file"
+new="198.51.100.$((n % 200 + 1))"
 printf '%s' "$new" > "$OCX_TEST_IP_FILE"
 printf 'Initialization Sequence Completed\n' > "$logfile"
 bash -c 'while :; do sleep 60; done' openvpn --config "$config" --writepid "$pidfile" >/dev/null 2>&1 &
@@ -178,6 +184,22 @@ if [[ "$cmd" == "run" ]]; then
   if [[ "${MOCK_RUN_MODE:-normal}" == "toolfail" ]]; then
     printf '%s\n' '{"type":"tool_use","sessionID":"ses_mock","part":{"tool":"edit","state":{"status":"completed"}}}'
     printf '%s\n' '{"type":"error","sessionID":"ses_mock","error":{"type":"provider.quota","message":"Quota exceeded"}}'
+    exit 1
+  fi
+  if [[ "${MOCK_RUN_MODE:-normal}" == "freelimit-once" ]]; then
+    n=$(cat "$MOCK_FREE_LIMIT_FILE" 2>/dev/null || printf 0)
+    n=$((n + 1))
+    printf '%s' "$n" > "$MOCK_FREE_LIMIT_FILE"
+    if (( n == 1 )); then
+      printf '%s\n' '{"type":"error","sessionID":"ses_mock","error":{"type":"provider.quota","message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go"}}'
+      exit 1
+    fi
+    printf '%s\n' '{"type":"text","sessionID":"ses_mock","part":{"type":"text","text":"OK after VPN rotate"}}'
+    exit 0
+  fi
+  if [[ "${MOCK_RUN_MODE:-normal}" == "freelimit-toolfail" ]]; then
+    printf '%s\n' '{"type":"tool_use","sessionID":"ses_mock","part":{"tool":"edit","state":{"status":"completed"}}}'
+    printf '%s\n' '{"type":"error","sessionID":"ses_mock","error":{"type":"provider.quota","message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go"}}'
     exit 1
   fi
   case "$model" in
@@ -313,6 +335,10 @@ assert_contains "$OUTPUT" "KHÔNG tự retry" "run --fallback refuses unsafe ret
 assert_contains "$OUTPUT" "ocx model switch" "run --fallback prints recovery command"
 MOCK_RUN_MODE=normal
 
+run_capture "$OCX" run --vpn-rotate "hello"
+assert_eq "$RC" 1 "--vpn-rotate requires --fallback"
+assert_contains "$OUTPUT" "chỉ dùng cùng --fallback" "--vpn-rotate explains required flag"
+
 # VPN OpenVPN
 new_env vpn
 make_mocks
@@ -353,9 +379,13 @@ run_capture "$OCX" vpn use 2
 assert_eq "$RC" 0 "vpn use numeric 2 exits 0"
 assert_contains "$(cat "$OCX_STATE_FILE")" "vn/vn-01" "vpn use numeric 2 selects vn-01"
 
+run_capture "$OCX" vpn next --same-region
+assert_eq "$RC" 0 "vpn next --same-region exits 0"
+assert_contains "$(cat "$OCX_STATE_FILE")" "vn/vn-02" "vpn next --same-region stays in vn"
+
 run_capture "$OCX" vpn next
 assert_eq "$RC" 0 "vpn next exits 0"
-assert_contains "$(cat "$OCX_STATE_FILE")" "vn/vn-02" "vpn next advances profile"
+assert_contains "$(cat "$OCX_STATE_FILE")" "jp/jp-01" "vpn next advances across regions"
 
 run_capture "$OCX" vpn use vn-01
 assert_eq "$RC" 0 "vpn use vn-01 again exits 0"
@@ -365,6 +395,40 @@ run_capture "$OCX" vpn next
 assert_eq "$RC" 0 "vpn next fails over"
 assert_contains "$(cat "$OCX_STATE_FILE")" "jp/jp-01" "vpn next failover reaches jp"
 unset MOCK_FAIL_PROFILE
+
+# Free usage limit -> rotate VPN in current region -> retry same model
+run_capture "$OCX" vpn use vn-01
+assert_eq "$RC" 0 "vpn use before free-limit test exits 0"
+MOCK_RUN_MODE=freelimit-once
+export MOCK_RUN_MODE
+: > "$MOCK_FREE_LIMIT_FILE"
+run_capture "$OCX" run --fallback --vpn-rotate "hello"
+assert_eq "$RC" 0 "run --fallback --vpn-rotate succeeds after VPN rotate"
+assert_contains "$OUTPUT" "OK after VPN rotate" "run --fallback prints retry output"
+assert_contains "$OUTPUT" "xoay VPN trong region hiện tại: vn" "free-limit rotation uses current region"
+assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-02" "free-limit rotation advances within vn"
+
+# Free usage limit sau tool call: tuyệt đối không tự xoay/retry
+run_capture "$OCX" vpn use vn-01
+assert_eq "$RC" 0 "vpn use before free-limit tool-call test exits 0"
+MOCK_RUN_MODE=freelimit-toolfail
+export MOCK_RUN_MODE
+run_capture "$OCX" run --fallback --vpn-rotate "hello"
+assert_eq "$RC" 1 "run --fallback --vpn-rotate stops after free-limit tool call"
+assert_contains "$OUTPUT" "KHÔNG tự retry" "free-limit tool call refuses retry"
+assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-01" "free-limit tool call does not rotate VPN"
+
+# Free usage limit -> xoay trong region chỉ định
+run_capture "$OCX" vpn use vn-01
+: > "$MOCK_FREE_LIMIT_FILE"
+MOCK_RUN_MODE=freelimit-once
+export MOCK_RUN_MODE
+run_capture "$OCX" run --fallback --vpn-rotate --vpn-region jp "hello"
+assert_eq "$RC" 0 "run --fallback --vpn-rotate --vpn-region jp succeeds"
+assert_contains "$OUTPUT" "xoay VPN trong region jp" "free-limit rotation uses explicit region"
+assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|jp/jp-01" "free-limit rotation moves to jp"
+MOCK_RUN_MODE=normal
+export MOCK_RUN_MODE
 
 run_capture "$OCX" vpn log 5
 assert_eq "$RC" 0 "vpn log exits 0"
@@ -386,7 +450,7 @@ assert_eq "$RC" 0 "wireguard disconnect exits 0"
 new_env import
 make_mocks
 mkdir -p "$TMP/src/vpn_vn" "$TMP/src/japan" "$TMP/src/misc" "$TMP/src/us"
-mkdir -p "$TMP/src/russian_federation" "$TMP/src/united_arab_emirates" "$TMP/src/united_state" "$TMP/src/wales"
+mkdir -p "$TMP/src/russian_federation" "$TMP/src/united_arab_emirates" "$TMP/src/united_state" "$TMP/src/wales" "$TMP/src/spain"
 printf 'client\n' > "$TMP/src/vpn_vn/a.ovpn"
 printf 'client\n' > "$TMP/src/japan/b.ovpn"
 printf '[Interface]\nPrivateKey = x\n' > "$TMP/src/misc/us-02.conf"
@@ -395,7 +459,8 @@ printf 'client\n' > "$TMP/src/russian_federation/ru-profile.ovpn"
 printf 'client\n' > "$TMP/src/united_arab_emirates/ae-profile.ovpn"
 printf 'client\n' > "$TMP/src/united_state/us-profile.ovpn"
 printf 'client\n' > "$TMP/src/wales/gb-profile.ovpn"
-run_capture "$OCX" vpn import "$TMP/src/vpn_vn" "$TMP/src/japan" "$TMP/src/misc/us-02.conf" "$TMP/src/us" "$TMP/src/russian_federation" "$TMP/src/united_arab_emirates" "$TMP/src/united_state" "$TMP/src/wales"
+printf 'client\n' > "$TMP/src/spain/es-profile.ovpn"
+run_capture "$OCX" vpn import "$TMP/src/vpn_vn" "$TMP/src/japan" "$TMP/src/misc/us-02.conf" "$TMP/src/us" "$TMP/src/russian_federation" "$TMP/src/united_arab_emirates" "$TMP/src/united_state" "$TMP/src/wales" "$TMP/src/spain"
 assert_eq "$RC" 0 "vpn import exits 0"
 [[ -f "$OCX_CONFIG_DIR/vpn/vn/a.ovpn" ]] && ok "import inferred vn" || bad "import inferred vn"
 [[ -f "$OCX_CONFIG_DIR/vpn/jp/b.ovpn" ]] && ok "import inferred jp" || bad "import inferred jp"
@@ -405,6 +470,7 @@ assert_eq "$RC" 0 "vpn import exits 0"
 [[ -f "$OCX_CONFIG_DIR/vpn/ae/ae-profile.ovpn" ]] && ok "import united_arab_emirates as ae" || bad "import united_arab_emirates as ae"
 [[ -f "$OCX_CONFIG_DIR/vpn/us/us-profile.ovpn" ]] && ok "import united_state as us" || bad "import united_state as us"
 [[ -f "$OCX_CONFIG_DIR/vpn/gb/gb-profile.ovpn" ]] && ok "import wales as gb" || bad "import wales as gb"
+[[ -f "$OCX_CONFIG_DIR/vpn/es/es-profile.ovpn" ]] && ok "import spain as es" || bad "import spain as es"
 
 run_capture "$OCX" doctor
 assert_eq "$RC" 0 "doctor exits 0"

@@ -31,6 +31,15 @@ OCX_MODELS_CACHE_TTL=300
 # Mặc định 0 vì 429 thường chỉ là giới hạn tạm thời, không phải hết quota.
 OCX_RUN_FALLBACK_ON_RATE_LIMIT=0
 
+# 1 = khi `ocx run --fallback` gặp đúng lỗi "Free usage limit reached",
+# tự xoay VPN một lần rồi thử lại model, nhưng chỉ khi chưa có tool call.
+# Có thể bật tạm thời bằng --vpn-rotate thay vì sửa file này.
+OCX_RUN_VPN_ON_FREE_LIMIT=0
+
+# Region dùng khi tự xoay VPN. Để trống = giữ region hiện tại.
+# Ví dụ: OCX_RUN_VPN_REGION="vn"
+OCX_RUN_VPN_REGION=""
+
 # Các endpoint kiểm tra IPv4 public. ocx thử lần lượt.
 OCX_HEALTH_URLS=(
   "https://api.ipify.org"

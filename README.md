@@ -236,15 +236,20 @@ ocx vpn next
 # Ngẫu nhiên
 ocx vpn random
 
-# Theo vùng
+# Theo vùng: xoay trong region jp
 ocx vpn region jp
+
+# Xoay trong đúng region đang kết nối, không nhảy sang region khác
+ocx vpn next --same-region
 
 # Thử lần lượt từ đầu danh sách
 ocx vpn auto
 ```
 
 Thứ tự xoay là thứ tự trong `ocx vpn list` (theo vùng rồi tên profile). Nếu
-profile hiện tại là profile cuối, `next` quay lại profile đầu.
+profile hiện tại là profile cuối, `next` quay lại profile đầu. `--same-region`
+lấy region từ profile đang được `ocx` quản lý; nếu chưa có VPN active, hãy dùng
+`--region R`.
 
 Mặc định `OCX_FAILOVER=1`: nếu profile được chọn không lên hoặc health check
 thất bại, `ocx` thử profile kế tiếp cho đến hết danh sách. Tắt:
@@ -364,6 +369,40 @@ ocx run -m primary "Refactor hàm parseToken"
 ocx run --fallback "Refactor hàm parseToken"
 ```
 
+Khi gặp lỗi free usage limit của OpenCode:
+
+```text
+Error: Free usage limit reached. Free models work in OpenCode
+(https://opencode.ai); subscribe to OpenCode Go to keep going:
+https://opencode.ai/go
+```
+
+có thể cho `ocx` xoay VPN rồi thử lại model:
+
+```bash
+# Xoay trong region hiện tại
+ocx run --fallback --vpn-rotate "Refactor hàm parseToken"
+
+# Xoay trong region chỉ định
+ocx run --fallback --vpn-rotate --vpn-region jp "Refactor hàm parseToken"
+```
+
+Cơ chế:
+
+- chỉ kích hoạt với đúng nhóm lỗi `free_limit`;
+- chỉ xoay khi **chưa có tool call**;
+- xoay tối đa **một lần** trong một lần chạy;
+- mặc định giữ nguyên region hiện tại, trừ khi truyền `--vpn-region`;
+- yêu cầu IP public phải đổi (`OCX_REQUIRE_IP_CHANGE=1` cho lần xoay);
+- nếu xoay VPN thất bại, `ocx` quay lại fallback model bình thường.
+
+Có thể bật cố định trong `~/.config/ocx/ocx.conf`:
+
+```bash
+OCX_RUN_VPN_ON_FREE_LIMIT=1
+# OCX_RUN_VPN_REGION="vn"   # tùy chọn; để trống = giữ region hiện tại
+```
+
 `--fallback` chạy `opencode run --format json`, đọc event và chỉ retry khi:
 
 - lỗi thuộc nhóm **quota**, **model unavailable**, hoặc **rate limit** (rate
@@ -384,6 +423,7 @@ Các nhóm lỗi:
 
 | Nhóm | Hành động |
 | --- | --- |
+| `free_limit` (Free usage limit reached) | xoay VPN một lần nếu bật `--vpn-rotate`, rồi fallback nếu vẫn lỗi |
 | `quota` (usage limit, exhausted, billing...) | fallback nếu chưa có tool call |
 | `unavailable` (model not found/no-route) | fallback nếu chưa có tool call |
 | `rate` (429) | mặc định không fallback; bật `OCX_RUN_FALLBACK_ON_RATE_LIMIT=1` nếu muốn |
@@ -393,6 +433,9 @@ Các nhóm lỗi:
 
 ### 6.4 Giới hạn hiện tại
 
+- Xoay VPN khi free usage limit là **opt-in**, chỉ chạy khi bật
+  `--vpn-rotate` hoặc `OCX_RUN_VPN_ON_FREE_LIMIT=1`; không đảm bảo quota
+  tài khoản được làm mới.
 - Không tự phát hiện quota **bên trong TUI đang chạy**. Bạn dùng
   `ocx model next` từ terminal khác, hoặc `/models` trong TUI.
 - Không tự replay prompt đã có tool call.
@@ -437,11 +480,17 @@ OCX_CHECK_UNMANAGED_VPN=1     # chặn nối nếu có OpenVPN ngoài ocx
 OCX_REQUIRE_IP_CHANGE=0
 OCX_MODELS_CACHE_TTL=300
 OCX_RUN_FALLBACK_ON_RATE_LIMIT=0
+OCX_RUN_VPN_ON_FREE_LIMIT=0
+OCX_RUN_VPN_REGION=""
 ```
 
 - `OCX_SUDO=none` chỉ dùng khi bạn đã cấu hình quyền phù hợp (ví dụ chạy bằng
   root); mặc định `ask` sẽ gọi `sudo`.
 - `OCX_MODELS_CACHE_TTL` là thời gian cache `opencode models`.
+- `OCX_RUN_VPN_ON_FREE_LIMIT=1` bật tự xoay VPN khi `ocx run --fallback` gặp
+  free usage limit; `OCX_RUN_VPN_REGION` để trống nghĩa là giữ region hiện tại.
+- Xoay VPN không làm mới quota tài khoản; đây chỉ là thay đổi egress IP. Nếu
+  provider vẫn báo hết quota, hãy dùng model/provider khác mà bạn có quyền.
 
 ---
 
@@ -539,7 +588,7 @@ Bộ test dùng mock, không gọi mạng thật, không đốt quota:
 ./tests/run-tests.sh
 ```
 
-Kết quả hiện tại: 58 pass, 0 fail.
+Kết quả hiện tại: 79 pass, 0 fail.
 
 ---
 
@@ -554,6 +603,7 @@ ocx vpn import ~/Workspace/test/vpn_vn --region vn
 ocx vpn import ~/Workspace/test/japan --region jp
 ocx vpn list
 ocx vpn next
+ocx vpn next --same-region
 ocx vpn region jp
 ocx vpn status
 ocx vpn log 100
@@ -566,7 +616,8 @@ ocx start glm
 ocx model current
 ocx model next
 ocx fallback
-ocx run --fallback "your prompt"
+ocx run --fallback --vpn-rotate "your prompt"
+ocx run --fallback --vpn-rotate --vpn-region jp "your prompt"
 
 # Chẩn đoán
 ocx doctor

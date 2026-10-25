@@ -43,6 +43,11 @@ OCX_REQUIRE_IP_CHANGE="${OCX_REQUIRE_IP_CHANGE:-0}"
 OCX_ROTATE_MODE="${OCX_ROTATE_MODE:-next}" # next | random | auto
 OCX_MODELS_CACHE_TTL="${OCX_MODELS_CACHE_TTL:-300}"
 OCX_RUN_FALLBACK_ON_RATE_LIMIT="${OCX_RUN_FALLBACK_ON_RATE_LIMIT:-0}"
+# Xoay VPN khi gặp đúng lỗi "Free usage limit reached" trong `ocx run --fallback`.
+# Mặc định tắt; bật bằng --vpn-rotate hoặc đặt biến này =1.
+OCX_RUN_VPN_ON_FREE_LIMIT="${OCX_RUN_VPN_ON_FREE_LIMIT:-0}"
+# Region dùng khi xoay VPN; để trống = giữ region hiện tại.
+OCX_RUN_VPN_REGION="${OCX_RUN_VPN_REGION:-}"
 OCX_HEALTH_KEEP="${OCX_HEALTH_KEEP:-500}"
 # Cảnh báo/không nối nếu có OpenVPN không do ocx quản lý đang chạy.
 OCX_CHECK_UNMANAGED_VPN="${OCX_CHECK_UNMANAGED_VPN:-1}"
@@ -273,8 +278,10 @@ Lệnh chính:
       Mở phiên OpenCode mới với model đã cấu hình.
   ocx tui
       Mở OpenCode TUI bình thường.
-  ocx run [-m alias] [--fallback] [--] <prompt...>
+  ocx run [-m alias] [--fallback] [--vpn-rotate] [--vpn-region R] [--] <prompt...>
       Chạy một prompt. --fallback chỉ retry khi lỗi quota/model và chưa có tool call.
+      --vpn-rotate: khi gặp free usage limit, xoay VPN một lần rồi thử lại model.
+      --vpn-region R: xoay trong region R; mặc định giữ region hiện tại.
   ocx models [--refresh]
       Liệt kê alias, model và trạng thái có trong `opencode models`.
   ocx model current|list|switch|next
@@ -297,6 +304,7 @@ Ví dụ:
   ocx vpn status
   ocx model next
   ocx run --fallback "Refactor hàm parseToken"
+  ocx run --fallback --vpn-rotate --vpn-region jp "Refactor hàm parseToken"
 
 Lưu ý:
   - VPN không làm mới quota của tài khoản/model. Dùng model/provider hợp lệ khác.
@@ -311,7 +319,7 @@ Cách dùng ocx vpn:
   ocx vpn regions
   ocx vpn import <file|dir>... [--region R] [--name NAME] [--force]
   ocx vpn use <profile> [--failover] [--require-new-ip]
-  ocx vpn next [--region R] [--random] [--no-failover]
+  ocx vpn next [--region R] [--same-region] [--random] [--no-failover]
   ocx vpn random [--region R]
   ocx vpn region <R>              (alias: use-region)
   ocx vpn auto [--region R]

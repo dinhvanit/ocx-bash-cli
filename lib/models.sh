@@ -430,6 +430,8 @@ classify_error() {
   case "$text" in
     *context\ length*|*context\ window*|*maximum\ context*|*too\ many\ tokens*|*token\ limit*)
       printf 'context'; return ;;
+    *free\ usage\ limit*|*free\ models\ work\ in\ opencode*|*subscribe\ to\ opencode\ go*)
+      printf 'free_limit'; return ;;
     *quota*|*usage\ limit*|*usage_limit*|*exhausted*|*insufficient_quota*|*billing*|*credit*|*daily\ limit*|*monthly\ limit*)
       printf 'quota'; return ;;
     *rate\ limit*|*rate_limit*|*429*|*too\ many\ requests*|*temporarily\ limited*)
@@ -476,19 +478,45 @@ suggest_after_failure() {
   [[ -n "$sid" ]] && printf '      opencode --session %s\n' "$sid" >&2
 }
 
+# Xoay VPN khi gặp free usage limit. Mặc định giữ nguyên region hiện tại;
+# nếu người dùng chỉ định region thì xoay trong region đó.
+rotate_vpn_on_free_limit() {
+  local region="${1:-}" current
+  if [[ -n "$region" ]]; then
+    info "xoay VPN trong region $region để thử lại sau free usage limit"
+    OCX_REQUIRE_IP_CHANGE=1 with_lock vpn_next --region "$region"
+    return
+  fi
+  if ! current="$(active_region 2>/dev/null || true)" || [[ -z "$current" ]]; then
+    warn "không có VPN đang được ocx quản lý; không thể xoay trong region"
+    return 1
+  fi
+  info "xoay VPN trong region hiện tại: $current"
+  OCX_REQUIRE_IP_CHANGE=1 with_lock vpn_next --same-region
+}
+
 model_run() {
-  local alias="primary" fallback=0
+  local alias="primary" fallback=0 vpn_flag=0
+  local vpn_on_free_limit="${OCX_RUN_VPN_ON_FREE_LIMIT:-0}"
+  local vpn_region="${OCX_RUN_VPN_REGION:-}"
   local -a prompt_parts=()
   while (($#)); do
     case "$1" in
       -m|--model) alias="${2:-}"; shift 2 ;;
       --fallback) fallback=1; shift ;;
+      --vpn-rotate|--vpn-on-free-limit) vpn_on_free_limit=1; vpn_flag=1; shift ;;
+      --vpn-region)
+        [[ -n "${2:-}" ]] || die "--vpn-region cần tên region"
+        vpn_region="$(normalize_region "$2")"; vpn_flag=1; shift 2 ;;
       --) shift; prompt_parts+=("$@"); break ;;
       -h|--help) usage_common; return 0 ;;
       *) prompt_parts+=("$1"); shift ;;
     esac
   done
-  ((${#prompt_parts[@]} > 0)) || die "cách dùng: ocx run [-m alias] [--fallback] <prompt...>"
+  ((${#prompt_parts[@]} > 0)) || die "cách dùng: ocx run [-m alias] [--fallback] [--vpn-rotate] [--vpn-region R] <prompt...>"
+  if (( vpn_flag == 1 )) && ! truthy "$fallback"; then
+    die "--vpn-rotate/--vpn-on-free-limit chỉ dùng cùng --fallback"
+  fi
   load_models
   local prompt="${prompt_parts[*]}"
   local model
@@ -522,41 +550,71 @@ model_run() {
   rcfile="$OCX_CACHE_DIR/run.$$.rc"
   : > "$tmp"; : > "$rcfile"
 
-  local success=0 idx=0 total=${#candidates[@]}
+  local success=0 idx=0 total=${#candidates[@]} vpn_rotated=0
+  local m attempt can_retry
   for m in "${candidates[@]}"; do
     idx=$((idx + 1))
-    printf '\n[ocx] model %s (%d/%d)\n' "$m" "$idx" "$total"
-    : > "$tmp"; : > "$rcfile"
+    attempt=0
 
-    set +e
-    ( "$OPENCODE_BIN" run --format json --model "$m" "$prompt"; printf '%s' "$?" > "$rcfile" ) \
-      | while IFS= read -r line; do
-          printf '%s\n' "$line" >> "$tmp"
-          render_event "$line"
-        done
-    set -e
+    # Cho phép thử lại cùng model một lần sau khi xoay VPN.
+    while (( attempt < 2 )); do
+      attempt=$((attempt + 1))
+      if (( attempt == 1 )); then
+        printf '\n[ocx] model %s (%d/%d)\n' "$m" "$idx" "$total"
+      else
+        printf '\n[ocx] model %s (%d/%d) - thử lại sau khi xoay VPN\n' "$m" "$idx" "$total"
+      fi
+      : > "$tmp"; : > "$rcfile"
 
-    rc="$(cat "$rcfile" 2>/dev/null || printf 1)"
-    printf '\n'
-    if [[ "$rc" == "0" ]]; then
-      success=1
+      set +e
+      ( "$OPENCODE_BIN" run --format json --model "$m" "$prompt"; printf '%s' "$?" > "$rcfile" ) \
+        | while IFS= read -r line; do
+            printf '%s\n' "$line" >> "$tmp"
+            render_event "$line"
+          done
+      set -e
+
+      rc="$(cat "$rcfile" 2>/dev/null || printf 1)"
+      printf '\n'
+      if [[ "$rc" == "0" ]]; then
+        success=1
+        break 2
+      fi
+
+      error_json="$("$JQ_BIN" -c 'select(.type == "error") | .error' "$tmp" 2>/dev/null | tail -n 1 || true)"
+      error_type=""
+      error_msg=""
+      if [[ -n "$error_json" ]]; then
+        error_type="$("$JQ_BIN" -r '.type // ""' <<< "$error_json" 2>/dev/null || true)"
+        error_msg="$("$JQ_BIN" -r '.message // ""' <<< "$error_json" 2>/dev/null || true)"
+      fi
+      tools="$("$JQ_BIN" -r 'select(.type == "tool_use") | .part.tool // "tool"' "$tmp" 2>/dev/null | wc -l | tr -d ' ')"
+      sid="$("$JQ_BIN" -r 'select(.sessionID != null) | .sessionID' "$tmp" 2>/dev/null | head -n 1 || true)"
+      kind="$(classify_error "$error_type $error_msg")"
+      # Một số phiên bản OpenCode có thể chỉ in lỗi dạng text trong JSONL.
+      if [[ "$kind" == "other" ]] \
+         && grep -qiE 'free usage limit reached|free models work in opencode|subscribe to opencode go' "$tmp"; then
+        kind="free_limit"
+      fi
+
+      # Chỉ xoay VPN khi lỗi đúng free usage limit, chưa có tool call và
+      # chưa xoay trong lần chạy này. Nếu xoay thất bại, vẫn fallback model.
+      if [[ "$kind" == "free_limit" ]] && (( tools == 0 )) \
+         && truthy "$vpn_on_free_limit" && (( vpn_rotated == 0 )); then
+        warn "gặp free usage limit trước khi có tool call"
+        if rotate_vpn_on_free_limit "$vpn_region"; then
+          vpn_rotated=1
+          info "đã xoay VPN; thử lại model $m"
+          continue
+        fi
+        warn "không xoay được VPN; tiếp tục fallback model"
+      fi
       break
-    fi
+    done
 
-    error_json="$("$JQ_BIN" -c 'select(.type == "error") | .error' "$tmp" 2>/dev/null | tail -n 1 || true)"
-    error_type=""
-    error_msg=""
-    if [[ -n "$error_json" ]]; then
-      error_type="$("$JQ_BIN" -r '.type // ""' <<< "$error_json" 2>/dev/null || true)"
-      error_msg="$("$JQ_BIN" -r '.message // ""' <<< "$error_json" 2>/dev/null || true)"
-    fi
-    tools="$("$JQ_BIN" -r 'select(.type == "tool_use") | .part.tool // "tool"' "$tmp" 2>/dev/null | wc -l | tr -d ' ')"
-    sid="$("$JQ_BIN" -r 'select(.sessionID != null) | .sessionID' "$tmp" 2>/dev/null | head -n 1 || true)"
-    kind="$(classify_error "$error_type $error_msg")"
-
-    local can_retry=0
+    can_retry=0
     case "$kind" in
-      quota|unavailable) (( tools == 0 )) && can_retry=1 ;;
+      quota|unavailable|free_limit) (( tools == 0 )) && can_retry=1 ;;
       rate) truthy "$OCX_RUN_FALLBACK_ON_RATE_LIMIT" && (( tools == 0 )) && can_retry=1 ;;
     esac
 
@@ -568,6 +626,12 @@ model_run() {
     suggest_after_failure "$m" "$tools" "$sid" "$kind"
     if [[ "$kind" == "rate" ]]; then
       printf '[ocx] 429 có thể chỉ là giới hạn tạm thời. Thử lại sau hoặc đặt OCX_RUN_FALLBACK_ON_RATE_LIMIT=1.\n' >&2
+    elif [[ "$kind" == "free_limit" ]]; then
+      if truthy "$vpn_on_free_limit"; then
+        printf '[ocx] Free usage limit vẫn còn sau khi xoay VPN. Kiểm tra IP/region hoặc thử VPN khác.\n' >&2
+      else
+        printf '[ocx] Free usage limit: dùng --vpn-rotate (hoặc OCX_RUN_VPN_ON_FREE_LIMIT=1) để xoay VPN.\n' >&2
+      fi
     elif [[ "$kind" == "auth" ]]; then
       printf '[ocx] Lỗi xác thực: chạy opencode auth list / /connect để kiểm tra provider.\n' >&2
     elif [[ "$kind" == "network" ]]; then

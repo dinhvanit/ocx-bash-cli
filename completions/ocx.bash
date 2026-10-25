@@ -41,13 +41,18 @@ _ocx() {
           ;;
         region|use-region)
           if (( COMP_CWORD == 3 )); then
-            COMPREPLY=( $(compgen -W "vn jp us sg kr tw hk th my id ph gb de fr nl ca au in misc" -- "$cur") )
+            COMPREPLY=( $(compgen -W "vn jp us sg kr tw hk th my id ph gb de fr nl ca au in es ru ae misc" -- "$cur") )
+          fi
+          ;;
+        next|rotate)
+          if (( COMP_CWORD >= 3 )); then
+            COMPREPLY=( $(compgen -W "--region --same-region --backend --random --no-failover --failover --help" -- "$cur") )
           fi
           ;;
       esac
       ;;
     run)
-      COMPREPLY=( $(compgen -W "-m --model --fallback --help" -- "$cur") )
+      COMPREPLY=( $(compgen -W "-m --model --fallback --vpn-rotate --vpn-on-free-limit --vpn-region --help" -- "$cur") )
       ;;
     start)
       COMPREPLY=( $(compgen -W "--mini --auto --dir --dry-run --force --help" -- "$cur") )
