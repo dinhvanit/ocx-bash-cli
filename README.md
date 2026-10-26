@@ -57,7 +57,7 @@ Sau khi cài:
 
 - Linux (Ubuntu/Debian khuyến nghị)
 - OpenCode CLI đã cài và đã đăng nhập provider
-- `bash` >= 4.4, `curl`, `jq`, `sudo`
+- `bash` >= 4.4, `curl`, `jq`, `sudo`, `timeout` (coreutils)
 - OpenVPN nếu dùng `.ovpn`
 - `wireguard-tools` nếu dùng `.conf`
 
@@ -377,30 +377,50 @@ Error: Free usage limit reached. Free models work in OpenCode
 https://opencode.ai/go
 ```
 
-có thể cho `ocx` xoay VPN rồi thử lại model:
+có thể cho `ocx` giữ nguyên model, tự xoay VPN và thử lại cho đến khi model
+phản hồi:
 
 ```bash
-# Xoay trong region hiện tại
+# Giữ model deepseek, xoay trong region hiện tại
 ocx run --fallback --vpn-rotate "Refactor hàm parseToken"
 
-# Xoay trong region chỉ định
+# Không cần --fallback; --vpn-rotate tự bật chế độ chạy có kiểm soát
+ocx run --vpn-rotate "Refactor hàm parseToken"
+
+# Chỉ xoay trong region jp
 ocx run --fallback --vpn-rotate --vpn-region jp "Refactor hàm parseToken"
+
+# Tối đa 50 lần xoay; mỗi lần chờ VPN tối đa 20 giây
+ocx run --vpn-rotate --vpn-rotate-max 50 --vpn-timeout 20 "Refactor hàm parseToken"
+
+# Model không phản hồi quá 120 giây thì coi là timeout và xoay VPN
+ocx run --vpn-rotate --run-timeout 120 "Refactor hàm parseToken"
 ```
 
 Cơ chế:
 
-- chỉ kích hoạt với đúng nhóm lỗi `free_limit`;
-- chỉ xoay khi **chưa có tool call**;
-- xoay tối đa **một lần** trong một lần chạy;
-- mặc định giữ nguyên region hiện tại, trừ khi truyền `--vpn-region`;
+- **giữ cố định model đã chọn** (`-m` hoặc primary); không tự fallback sang
+  model khác trong chế độ `--vpn-rotate`;
+- xoay khi gặp đúng `free_limit`, khi `opencode run` timeout, hoặc lỗi mạng;
+- tuyệt đối **không xoay/retry nếu đã có tool call**;
+- mỗi lần xoay thử một profile; profile lỗi/timeout thì chuyển ngay profile kế
+  tiếp, không chờ hết failover của cả region;
+- xoay tối đa `--vpn-rotate-max` lần (mặc định 20; `0` = không giới hạn);
+- mỗi lần kết nối/kiểm tra IP có timeout `--vpn-timeout` (mặc định 30 giây);
+- mỗi lần gọi OpenCode có timeout `--run-timeout` (mặc định 180 giây; `0` = tắt);
+- mặc định giữ region hiện tại, trừ khi truyền `--vpn-region`;
 - yêu cầu IP public phải đổi (`OCX_REQUIRE_IP_CHANGE=1` cho lần xoay);
-- nếu xoay VPN thất bại, `ocx` quay lại fallback model bình thường.
+- dừng ở VPN đầu tiên mà model trả lời thành công; nếu hết lượt xoay mà vẫn
+  lỗi thì dừng, không đổi model.
 
-Có thể bật cố định trong `~/.config/ocx/ocx.conf`:
+Có thể bật mặc định trong `~/.config/ocx/ocx.conf`:
 
 ```bash
 OCX_RUN_VPN_ON_FREE_LIMIT=1
-# OCX_RUN_VPN_REGION="vn"   # tùy chọn; để trống = giữ region hiện tại
+# OCX_RUN_VPN_REGION="vn"       # tùy chọn; để trống = giữ region hiện tại
+OCX_RUN_VPN_MAX=20              # 0 = không giới hạn
+OCX_RUN_VPN_TIMEOUT=30          # timeout mỗi lần kết nối/kiểm tra IP
+OCX_RUN_TIMEOUT=180             # timeout mỗi lần gọi OpenCode; 0 = tắt
 ```
 
 `--fallback` chạy `opencode run --format json`, đọc event và chỉ retry khi:
@@ -423,19 +443,24 @@ Các nhóm lỗi:
 
 | Nhóm | Hành động |
 | --- | --- |
-| `free_limit` (Free usage limit reached) | xoay VPN một lần nếu bật `--vpn-rotate`, rồi fallback nếu vẫn lỗi |
+| `free_limit` (Free usage limit reached) | xoay VPN lặp lại nếu bật `--vpn-rotate`; giữ nguyên model, dừng khi model trả lời hoặc hết lượt |
 | `quota` (usage limit, exhausted, billing...) | fallback nếu chưa có tool call |
 | `unavailable` (model not found/no-route) | fallback nếu chưa có tool call |
 | `rate` (429) | mặc định không fallback; bật `OCX_RUN_FALLBACK_ON_RATE_LIMIT=1` nếu muốn |
 | `auth` | dừng, kiểm tra `opencode auth list` / `/connect` |
-| `network` | dừng, kiểm tra mạng/VPN |
+| `network` | dừng nếu không bật `--vpn-rotate`; nếu bật thì xoay VPN và thử lại |
+| `timeout` | dừng nếu không bật `--vpn-rotate`; nếu bật thì xoay VPN và thử lại |
 | `context` | dừng, dùng `/compact` hoặc model context lớn hơn |
 
 ### 6.4 Giới hạn hiện tại
 
-- Xoay VPN khi free usage limit là **opt-in**, chỉ chạy khi bật
-  `--vpn-rotate` hoặc `OCX_RUN_VPN_ON_FREE_LIMIT=1`; không đảm bảo quota
-  tài khoản được làm mới.
+- Xoay VPN là **opt-in**, chỉ chạy khi bật `--vpn-rotate` hoặc
+  `OCX_RUN_VPN_ON_FREE_LIMIT=1`; áp dụng cho free usage limit, timeout và lỗi
+  mạng trước khi có tool call. Không đảm bảo quota tài khoản được làm mới.
+- Xoay VPN lặp lại có thể mất thời gian. Dùng `--vpn-rotate-max`,
+  `--vpn-timeout`, `--run-timeout` để giới hạn; `Ctrl-C` để dừng ngay.
+- Nếu có OpenVPN không do `ocx` quản lý, `ocx` dừng trước khi xoay để tránh
+  chồng tunnel; hãy tắt VPN đó trước.
 - Không tự phát hiện quota **bên trong TUI đang chạy**. Bạn dùng
   `ocx model next` từ terminal khác, hoặc `/models` trong TUI.
 - Không tự replay prompt đã có tool call.
@@ -482,13 +507,19 @@ OCX_MODELS_CACHE_TTL=300
 OCX_RUN_FALLBACK_ON_RATE_LIMIT=0
 OCX_RUN_VPN_ON_FREE_LIMIT=0
 OCX_RUN_VPN_REGION=""
+OCX_RUN_VPN_MAX=20             # 0 = không giới hạn
+OCX_RUN_VPN_TIMEOUT=30         # timeout mỗi lần kết nối/kiểm tra IP
+OCX_RUN_TIMEOUT=180            # timeout mỗi lần gọi OpenCode; 0 = tắt
 ```
 
 - `OCX_SUDO=none` chỉ dùng khi bạn đã cấu hình quyền phù hợp (ví dụ chạy bằng
   root); mặc định `ask` sẽ gọi `sudo`.
 - `OCX_MODELS_CACHE_TTL` là thời gian cache `opencode models`.
-- `OCX_RUN_VPN_ON_FREE_LIMIT=1` bật tự xoay VPN khi `ocx run --fallback` gặp
-  free usage limit; `OCX_RUN_VPN_REGION` để trống nghĩa là giữ region hiện tại.
+- `OCX_RUN_VPN_ON_FREE_LIMIT=1` bật tự xoay VPN khi `ocx run` gặp free usage
+  limit/timeout/lỗi mạng; `OCX_RUN_VPN_REGION` để trống nghĩa là giữ region
+  hiện tại.
+- `OCX_RUN_VPN_MAX`, `OCX_RUN_VPN_TIMEOUT`, `OCX_RUN_TIMEOUT` giới hạn số lần
+  xoay và thời gian chờ; có thể override bằng cờ dòng lệnh.
 - Xoay VPN không làm mới quota tài khoản; đây chỉ là thay đổi egress IP. Nếu
   provider vẫn báo hết quota, hãy dùng model/provider khác mà bạn có quyền.
 
@@ -588,7 +619,7 @@ Bộ test dùng mock, không gọi mạng thật, không đốt quota:
 ./tests/run-tests.sh
 ```
 
-Kết quả hiện tại: 79 pass, 0 fail.
+Kết quả hiện tại: 100 pass, 0 fail.
 
 ---
 
@@ -617,6 +648,7 @@ ocx model current
 ocx model next
 ocx fallback
 ocx run --fallback --vpn-rotate "your prompt"
+ocx run --vpn-rotate --vpn-rotate-max 50 --vpn-timeout 20 "your prompt"
 ocx run --fallback --vpn-rotate --vpn-region jp "your prompt"
 
 # Chẩn đoán

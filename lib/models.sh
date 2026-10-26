@@ -478,52 +478,66 @@ suggest_after_failure() {
   [[ -n "$sid" ]] && printf '      opencode --session %s\n' "$sid" >&2
 }
 
-# Xoay VPN khi gặp free usage limit. Mặc định giữ nguyên region hiện tại;
-# nếu người dùng chỉ định region thì xoay trong region đó.
-rotate_vpn_on_free_limit() {
-  local region="${1:-}" current
-  if [[ -n "$region" ]]; then
-    info "xoay VPN trong region $region để thử lại sau free usage limit"
-    OCX_REQUIRE_IP_CHANGE=1 with_lock vpn_next --region "$region"
-    return
-  fi
-  if ! current="$(active_region 2>/dev/null || true)" || [[ -z "$current" ]]; then
-    warn "không có VPN đang được ocx quản lý; không thể xoay trong region"
-    return 1
-  fi
-  info "xoay VPN trong region hiện tại: $current"
-  OCX_REQUIRE_IP_CHANGE=1 with_lock vpn_next --same-region
+# Kết nối một profile VPN cụ thể để xoay IP. Không dùng failover nội bộ:
+# vòng lặp trong model_run sẽ tự chọn profile kế tiếp nếu profile này lỗi.
+rotate_vpn_to_profile() {
+  local profile="$1" timeout="${2:-$OCX_RUN_VPN_TIMEOUT}"
+  [[ -n "$profile" ]] || { warn "không có profile VPN để xoay"; return 1; }
+  info "thử VPN: $profile"
+  OCX_CONNECT_TIMEOUT="$timeout" OCX_IP_TIMEOUT="$timeout" \
+    with_lock vpn_use "$profile" --no-failover --require-new-ip
 }
 
 model_run() {
-  local alias="primary" fallback=0 vpn_flag=0
+  local alias="primary" fallback=0 vpn_region_flag=0
   local vpn_on_free_limit="${OCX_RUN_VPN_ON_FREE_LIMIT:-0}"
   local vpn_region="${OCX_RUN_VPN_REGION:-}"
+  local vpn_max="${OCX_RUN_VPN_MAX:-20}"
+  local vpn_timeout="${OCX_RUN_VPN_TIMEOUT:-30}"
+  local run_timeout="${OCX_RUN_TIMEOUT:-180}"
   local -a prompt_parts=()
   while (($#)); do
     case "$1" in
       -m|--model) alias="${2:-}"; shift 2 ;;
       --fallback) fallback=1; shift ;;
-      --vpn-rotate|--vpn-on-free-limit) vpn_on_free_limit=1; vpn_flag=1; shift ;;
+      --vpn-rotate|--vpn-on-free-limit) vpn_on_free_limit=1; shift ;;
+      --vpn-rotate-max|--vpn-max)
+        [[ "${2:-}" =~ ^[0-9]+$ ]] || die "--vpn-rotate-max cần số nguyên >= 0"
+        vpn_max="$2"; shift 2 ;;
+      --vpn-timeout)
+        [[ "${2:-}" =~ ^[1-9][0-9]*$ ]] || die "--vpn-timeout cần số nguyên dương (giây)"
+        vpn_timeout="$2"; shift 2 ;;
+      --run-timeout)
+        [[ "${2:-}" =~ ^[0-9]+$ ]] || die "--run-timeout cần số nguyên >= 0 (giây)"
+        run_timeout="$2"; shift 2 ;;
       --vpn-region)
         [[ -n "${2:-}" ]] || die "--vpn-region cần tên region"
-        vpn_region="$(normalize_region "$2")"; vpn_flag=1; shift 2 ;;
+        vpn_region="$(normalize_region "$2")"; vpn_region_flag=1; shift 2 ;;
       --) shift; prompt_parts+=("$@"); break ;;
       -h|--help) usage_common; return 0 ;;
       *) prompt_parts+=("$1"); shift ;;
     esac
   done
-  ((${#prompt_parts[@]} > 0)) || die "cách dùng: ocx run [-m alias] [--fallback] [--vpn-rotate] [--vpn-region R] <prompt...>"
-  if (( vpn_flag == 1 )) && ! truthy "$fallback"; then
-    die "--vpn-rotate/--vpn-on-free-limit chỉ dùng cùng --fallback"
+  ((${#prompt_parts[@]} > 0)) || die "cách dùng: ocx run [-m alias] [--fallback] [--vpn-rotate] [--vpn-region R] [--vpn-rotate-max N] [--vpn-timeout S] [--run-timeout S] <prompt...>"
+  if (( vpn_region_flag == 1 )) && ! truthy "$vpn_on_free_limit"; then
+    die "--vpn-region chỉ dùng cùng --vpn-rotate (hoặc OCX_RUN_VPN_ON_FREE_LIMIT=1)"
   fi
+  [[ "$vpn_max" =~ ^[0-9]+$ ]] || die "OCX_RUN_VPN_MAX phải là số nguyên >= 0"
+  [[ "$vpn_timeout" =~ ^[1-9][0-9]*$ ]] || die "OCX_RUN_VPN_TIMEOUT phải là số nguyên dương"
+  [[ "$run_timeout" =~ ^[0-9]+$ ]] || die "OCX_RUN_TIMEOUT phải là số nguyên >= 0"
   load_models
   local prompt="${prompt_parts[*]}"
   local model
   model="$(model_resolve "$alias")"
   require_cmd "$OPENCODE_BIN"
 
-  if ! truthy "$fallback"; then
+  # --vpn-rotate cần chạy ở chế độ có retry/kiểm soát, kể cả khi người dùng
+  # không truyền --fallback. Không dùng exec trực tiếp trong trường hợp này.
+  if ! truthy "$fallback" && ! truthy "$vpn_on_free_limit"; then
+    if (( run_timeout > 0 )) && have_cmd timeout; then
+      exec timeout --signal=TERM --kill-after=5 "$run_timeout" \
+        "$OPENCODE_BIN" run --model "$model" "$prompt"
+    fi
     exec "$OPENCODE_BIN" run --model "$model" "$prompt"
   fi
 
@@ -544,20 +558,62 @@ model_run() {
     # trước, sau đó thử toàn bộ chain.
     candidates=("$model" "${chain[@]}")
   fi
+  # Chế độ xoay VPN giữ cố định model đã chọn; không fallback sang model khác.
+  if truthy "$vpn_on_free_limit"; then
+    candidates=("$model")
+  fi
 
   local tmp rcfile rc error_json error_type error_msg kind tools sid
   tmp="$OCX_CACHE_DIR/run.$$.jsonl"
   rcfile="$OCX_CACHE_DIR/run.$$.rc"
   : > "$tmp"; : > "$rcfile"
 
-  local success=0 idx=0 total=${#candidates[@]} vpn_rotated=0
-  local m attempt can_retry
+  local success=0 idx=0 total=${#candidates[@]}
+  local attempt can_retry
+
+  # Chuẩn bị danh sách profile cho chế độ xoay VPN. Danh sách được chốt một
+  # lần để vòng lặp vẫn tiếp tục đúng profile kế tiếp khi connect thất bại.
+  local -a vpn_names=()
+  local vpn_index=0 vpn_attempts=0 vpn_explicit_region=0
+  local vpn_region_label="" vpn_current="" vi
+  if truthy "$vpn_on_free_limit"; then
+    [[ -n "$vpn_region" ]] && vpn_explicit_region=1
+    if [[ -z "$vpn_region" ]]; then
+      vpn_region="$(active_region 2>/dev/null || true)"
+    fi
+    if [[ -n "$vpn_region" ]]; then
+      mapfile -t vpn_names < <(profile_names "$vpn_region")
+      if (( vpn_explicit_region == 1 )); then
+        vpn_region_label="region $vpn_region"
+      else
+        vpn_region_label="region hiện tại: $vpn_region"
+      fi
+    else
+      mapfile -t vpn_names < <(profile_names "")
+      vpn_region_label="mọi region"
+    fi
+    state_load
+    vpn_current="${ACTIVE_PROFILE:-}"
+    if [[ -n "$vpn_current" && ${#vpn_names[@]} -gt 0 ]]; then
+      for ((vi = 0; vi < ${#vpn_names[@]}; vi++)); do
+        if [[ "${vpn_names[$vi]}" == "$vpn_current" ]]; then
+          vpn_index=$(( (vi + 1) % ${#vpn_names[@]} ))
+          break
+        fi
+      done
+    fi
+    if (( ${#vpn_names[@]} == 0 )); then
+      warn "không có profile VPN để xoay ($vpn_region_label)"
+    fi
+  fi
+
   for m in "${candidates[@]}"; do
     idx=$((idx + 1))
     attempt=0
 
-    # Cho phép thử lại cùng model một lần sau khi xoay VPN.
-    while (( attempt < 2 )); do
+    # Vòng lặp này chỉ tiếp tục khi xoay VPN thành công. Model được giữ cố
+    # định trong chế độ --vpn-rotate.
+    while :; do
       attempt=$((attempt + 1))
       if (( attempt == 1 )); then
         printf '\n[ocx] model %s (%d/%d)\n' "$m" "$idx" "$total"
@@ -567,11 +623,20 @@ model_run() {
       : > "$tmp"; : > "$rcfile"
 
       set +e
-      ( "$OPENCODE_BIN" run --format json --model "$m" "$prompt"; printf '%s' "$?" > "$rcfile" ) \
-        | while IFS= read -r line; do
-            printf '%s\n' "$line" >> "$tmp"
-            render_event "$line"
-          done
+      if (( run_timeout > 0 )) && have_cmd timeout; then
+        ( timeout --signal=TERM --kill-after=5 "$run_timeout" \
+            "$OPENCODE_BIN" run --format json --model "$m" "$prompt"; printf '%s' "$?" > "$rcfile" ) \
+          | while IFS= read -r line; do
+              printf '%s\n' "$line" >> "$tmp"
+              render_event "$line"
+            done
+      else
+        ( "$OPENCODE_BIN" run --format json --model "$m" "$prompt"; printf '%s' "$?" > "$rcfile" ) \
+          | while IFS= read -r line; do
+              printf '%s\n' "$line" >> "$tmp"
+              render_event "$line"
+            done
+      fi
       set -e
 
       rc="$(cat "$rcfile" 2>/dev/null || printf 1)"
@@ -596,18 +661,61 @@ model_run() {
          && grep -qiE 'free usage limit reached|free models work in opencode|subscribe to opencode go' "$tmp"; then
         kind="free_limit"
       fi
+      # `timeout` trả 124 khi tiến trình không phản hồi.
+      if [[ "$rc" == "124" ]]; then
+        kind="timeout"
+      fi
 
-      # Chỉ xoay VPN khi lỗi đúng free usage limit, chưa có tool call và
-      # chưa xoay trong lần chạy này. Nếu xoay thất bại, vẫn fallback model.
-      if [[ "$kind" == "free_limit" ]] && (( tools == 0 )) \
-         && truthy "$vpn_on_free_limit" && (( vpn_rotated == 0 )); then
-        warn "gặp free usage limit trước khi có tool call"
-        if rotate_vpn_on_free_limit "$vpn_region"; then
-          vpn_rotated=1
+      # Xoay VPN khi free limit, timeout hoặc lỗi mạng, nhưng tuyệt đối không
+      # khi đã có tool call. Mỗi lần xoay thử một profile; profile lỗi thì
+      # chuyển ngay sang profile kế tiếp.
+      if truthy "$vpn_on_free_limit" && (( tools == 0 )) \
+         && [[ "$kind" == "free_limit" || "$kind" == "timeout" || "$kind" == "network" ]]; then
+        case "$kind" in
+          free_limit) warn "gặp free usage limit trước khi có tool call" ;;
+          timeout)    warn "model không phản hồi (timeout) trước khi có tool call" ;;
+          network)    warn "gặp lỗi mạng trước khi có tool call" ;;
+        esac
+        if (( ${#vpn_names[@]} == 0 )); then
+          warn "không có profile VPN để xoay; dừng"
+          break
+        fi
+        if (( vpn_max > 0 && vpn_attempts >= vpn_max )); then
+          warn "đã đạt giới hạn $vpn_max lần xoay VPN; dừng"
+          break
+        fi
+        if truthy "$OCX_CHECK_UNMANAGED_VPN"; then
+          local -a unmanaged=()
+          mapfile -t unmanaged < <(unmanaged_openvpn_pids)
+          if (( ${#unmanaged[@]} > 0 )); then
+            warn "phát hiện OpenVPN không do ocx quản lý: PID ${unmanaged[*]}"
+            warn "hãy dừng VPN đó trước rồi thử lại; ocx không tự kill process ngoài state/pidfile"
+            break
+          fi
+        fi
+
+        local rotated=0 target
+        while (( vpn_max == 0 || vpn_attempts < vpn_max )); do
+          target="${vpn_names[$vpn_index]}"
+          vpn_index=$(( (vpn_index + 1) % ${#vpn_names[@]} ))
+          vpn_attempts=$((vpn_attempts + 1))
+          if (( vpn_max > 0 )); then
+            info "xoay VPN trong $vpn_region_label (${vpn_attempts}/${vpn_max})"
+          else
+            info "xoay VPN trong $vpn_region_label (${vpn_attempts})"
+          fi
+          if rotate_vpn_to_profile "$target" "$vpn_timeout"; then
+            rotated=1
+            break
+          fi
+          warn "VPN $target không kết nối được; thử profile tiếp theo"
+        done
+        if (( rotated == 1 )); then
           info "đã xoay VPN; thử lại model $m"
           continue
         fi
-        warn "không xoay được VPN; tiếp tục fallback model"
+        warn "không xoay được VPN sau $vpn_attempts lần; dừng"
+        break
       fi
       break
     done
@@ -623,12 +731,16 @@ model_run() {
       continue
     fi
 
-    suggest_after_failure "$m" "$tools" "$sid" "$kind"
+    if truthy "$vpn_on_free_limit" && (( tools == 0 )); then
+      printf '\n[ocx] model %s vẫn lỗi (%s) ở chế độ giữ model cố định.\n' "$m" "$kind" >&2
+    else
+      suggest_after_failure "$m" "$tools" "$sid" "$kind"
+    fi
     if [[ "$kind" == "rate" ]]; then
       printf '[ocx] 429 có thể chỉ là giới hạn tạm thời. Thử lại sau hoặc đặt OCX_RUN_FALLBACK_ON_RATE_LIMIT=1.\n' >&2
     elif [[ "$kind" == "free_limit" ]]; then
       if truthy "$vpn_on_free_limit"; then
-        printf '[ocx] Free usage limit vẫn còn sau khi xoay VPN. Kiểm tra IP/region hoặc thử VPN khác.\n' >&2
+        printf '[ocx] Free usage limit vẫn còn sau khi thử xoay VPN. Kiểm tra IP/region hoặc thử VPN khác.\n' >&2
       else
         printf '[ocx] Free usage limit: dùng --vpn-rotate (hoặc OCX_RUN_VPN_ON_FREE_LIMIT=1) để xoay VPN.\n' >&2
       fi
@@ -636,6 +748,8 @@ model_run() {
       printf '[ocx] Lỗi xác thực: chạy opencode auth list / /connect để kiểm tra provider.\n' >&2
     elif [[ "$kind" == "network" ]]; then
       printf '[ocx] Lỗi mạng: kiểm tra VPN/kết nối trước khi đổi model.\n' >&2
+    elif [[ "$kind" == "timeout" ]]; then
+      printf '[ocx] Timeout: model không phản hồi trong %ss. Kiểm tra VPN hoặc tăng --run-timeout.\n' "$run_timeout" >&2
     elif [[ "$kind" == "context" ]]; then
       printf '[ocx] Hết context: dùng /compact hoặc model có context lớn hơn.\n' >&2
     fi

@@ -43,11 +43,17 @@ OCX_REQUIRE_IP_CHANGE="${OCX_REQUIRE_IP_CHANGE:-0}"
 OCX_ROTATE_MODE="${OCX_ROTATE_MODE:-next}" # next | random | auto
 OCX_MODELS_CACHE_TTL="${OCX_MODELS_CACHE_TTL:-300}"
 OCX_RUN_FALLBACK_ON_RATE_LIMIT="${OCX_RUN_FALLBACK_ON_RATE_LIMIT:-0}"
-# Xoay VPN khi gặp đúng lỗi "Free usage limit reached" trong `ocx run --fallback`.
+# Xoay VPN khi gặp đúng lỗi "Free usage limit reached" trong `ocx run`.
 # Mặc định tắt; bật bằng --vpn-rotate hoặc đặt biến này =1.
 OCX_RUN_VPN_ON_FREE_LIMIT="${OCX_RUN_VPN_ON_FREE_LIMIT:-0}"
 # Region dùng khi xoay VPN; để trống = giữ region hiện tại.
 OCX_RUN_VPN_REGION="${OCX_RUN_VPN_REGION:-}"
+# Số lần thử xoay VPN tối đa trong một lần `ocx run`; 0 = không giới hạn.
+OCX_RUN_VPN_MAX="${OCX_RUN_VPN_MAX:-20}"
+# Timeout cho mỗi lần kết nối/kiểm tra IP VPN khi xoay (giây).
+OCX_RUN_VPN_TIMEOUT="${OCX_RUN_VPN_TIMEOUT:-30}"
+# Timeout cho mỗi lần gọi `opencode run` (giây); 0 = tắt timeout.
+OCX_RUN_TIMEOUT="${OCX_RUN_TIMEOUT:-180}"
 OCX_HEALTH_KEEP="${OCX_HEALTH_KEEP:-500}"
 # Cảnh báo/không nối nếu có OpenVPN không do ocx quản lý đang chạy.
 OCX_CHECK_UNMANAGED_VPN="${OCX_CHECK_UNMANAGED_VPN:-1}"
@@ -278,10 +284,15 @@ Lệnh chính:
       Mở phiên OpenCode mới với model đã cấu hình.
   ocx tui
       Mở OpenCode TUI bình thường.
-  ocx run [-m alias] [--fallback] [--vpn-rotate] [--vpn-region R] [--] <prompt...>
+  ocx run [-m alias] [--fallback] [--vpn-rotate] [--vpn-region R]
+          [--vpn-rotate-max N] [--vpn-timeout S] [--run-timeout S] [--] <prompt...>
       Chạy một prompt. --fallback chỉ retry khi lỗi quota/model và chưa có tool call.
-      --vpn-rotate: khi gặp free usage limit, xoay VPN một lần rồi thử lại model.
+      --vpn-rotate: giữ nguyên model đã chọn; gặp free usage limit, timeout hoặc
+      lỗi mạng thì xoay VPN và thử lại.
       --vpn-region R: xoay trong region R; mặc định giữ region hiện tại.
+      --vpn-rotate-max N: số lần xoay tối đa (mặc định 20; 0 = không giới hạn).
+      --vpn-timeout S: timeout mỗi lần kết nối/kiểm tra IP VPN (mặc định 30s).
+      --run-timeout S: timeout mỗi lần gọi OpenCode (mặc định 180s; 0 = tắt).
   ocx models [--refresh]
       Liệt kê alias, model và trạng thái có trong `opencode models`.
   ocx model current|list|switch|next
@@ -305,6 +316,7 @@ Ví dụ:
   ocx model next
   ocx run --fallback "Refactor hàm parseToken"
   ocx run --fallback --vpn-rotate --vpn-region jp "Refactor hàm parseToken"
+  ocx run --vpn-rotate --vpn-rotate-max 50 --vpn-timeout 20 "Refactor hàm parseToken"
 
 Lưu ý:
   - VPN không làm mới quota của tài khoản/model. Dùng model/provider hợp lệ khác.

@@ -58,6 +58,9 @@ OCX_SUDO_NONINTERACTIVE=1
 OCX_FAILOVER=1
 OCX_REQUIRE_IP_CHANGE=0
 OCX_RUN_FALLBACK_ON_RATE_LIMIT=0
+OCX_RUN_VPN_MAX=20
+OCX_RUN_VPN_TIMEOUT=3
+OCX_RUN_TIMEOUT=10
 OCX_CHECK_UNMANAGED_VPN=0
 EOF
 }
@@ -75,11 +78,12 @@ new_env() {
   export MOCK_PIDS_FILE="$ENV_DIR/mock.pids"
   export MOCK_MODEL_FILE="$ENV_DIR/model.txt"
   export MOCK_FREE_LIMIT_FILE="$ENV_DIR/free-limit.count"
+  export MOCK_TIMEOUT_FILE="$ENV_DIR/timeout.count"
   export MOCK_RUN_MODE="${MOCK_RUN_MODE:-normal}"
   mkdir -p "$OCX_CONFIG_DIR/vpn/vn" "$OCX_CONFIG_DIR/vpn/jp" \
            "$OCX_CONFIG_DIR/wireguard/us" "$OCX_CACHE_DIR" "$OCX_STATE_DIR"
   printf '203.0.113.10' > "$OCX_TEST_IP_FILE"
-  rm -f "$OCX_TEST_IP_FILE.counter" "$MOCK_FREE_LIMIT_FILE"
+  rm -f "$OCX_TEST_IP_FILE.counter" "$MOCK_FREE_LIMIT_FILE" "$MOCK_TIMEOUT_FILE"
   printf 'opencode/deepseek-v4.1-flash-free' > "$MOCK_MODEL_FILE"
   : > "$MOCK_PIDS_FILE"
   write_config
@@ -195,6 +199,35 @@ if [[ "$cmd" == "run" ]]; then
       exit 1
     fi
     printf '%s\n' '{"type":"text","sessionID":"ses_mock","part":{"type":"text","text":"OK after VPN rotate"}}'
+    exit 0
+  fi
+  if [[ "${MOCK_RUN_MODE:-normal}" == "freelimit-twice" ]]; then
+    n=$(cat "$MOCK_FREE_LIMIT_FILE" 2>/dev/null || printf 0)
+    n=$((n + 1))
+    printf '%s' "$n" > "$MOCK_FREE_LIMIT_FILE"
+    if (( n <= 2 )); then
+      printf '%s\n' '{"type":"error","sessionID":"ses_mock","error":{"type":"provider.quota","message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go"}}'
+      exit 1
+    fi
+    printf '%s\n' '{"type":"text","sessionID":"ses_mock","part":{"type":"text","text":"OK after two VPN rotations"}}'
+    exit 0
+  fi
+  if [[ "${MOCK_RUN_MODE:-normal}" == "freelimit-primary-always" ]]; then
+    if [[ "$model" == *deepseek* ]]; then
+      printf '%s\n' '{"type":"error","sessionID":"ses_mock","error":{"type":"provider.quota","message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go"}}'
+      exit 1
+    fi
+    printf '%s\n' '{"type":"text","sessionID":"ses_mock","part":{"type":"text","text":"OK from fallback"}}'
+    exit 0
+  fi
+  if [[ "${MOCK_RUN_MODE:-normal}" == "timeout-once" ]]; then
+    n=$(cat "$MOCK_TIMEOUT_FILE" 2>/dev/null || printf 0)
+    n=$((n + 1))
+    printf '%s' "$n" > "$MOCK_TIMEOUT_FILE"
+    if (( n == 1 )); then
+      sleep 5
+    fi
+    printf '%s\n' '{"type":"text","sessionID":"ses_mock","part":{"type":"text","text":"OK after timeout rotate"}}'
     exit 0
   fi
   if [[ "${MOCK_RUN_MODE:-normal}" == "freelimit-toolfail" ]]; then
@@ -335,9 +368,9 @@ assert_contains "$OUTPUT" "KHÔNG tự retry" "run --fallback refuses unsafe ret
 assert_contains "$OUTPUT" "ocx model switch" "run --fallback prints recovery command"
 MOCK_RUN_MODE=normal
 
-run_capture "$OCX" run --vpn-rotate "hello"
-assert_eq "$RC" 1 "--vpn-rotate requires --fallback"
-assert_contains "$OUTPUT" "chỉ dùng cùng --fallback" "--vpn-rotate explains required flag"
+run_capture "$OCX" run --vpn-region jp "hello"
+assert_eq "$RC" 1 "--vpn-region requires --vpn-rotate"
+assert_contains "$OUTPUT" "--vpn-region chỉ dùng cùng --vpn-rotate" "--vpn-region explains required flag"
 
 # VPN OpenVPN
 new_env vpn
@@ -427,6 +460,63 @@ run_capture "$OCX" run --fallback --vpn-rotate --vpn-region jp "hello"
 assert_eq "$RC" 0 "run --fallback --vpn-rotate --vpn-region jp succeeds"
 assert_contains "$OUTPUT" "xoay VPN trong region jp" "free-limit rotation uses explicit region"
 assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|jp/jp-01" "free-limit rotation moves to jp"
+
+# --vpn-rotate không bắt buộc --fallback; giữ nguyên model đã chọn
+add_profile vn vn-03
+run_capture "$OCX" vpn use vn-01
+assert_eq "$RC" 0 "vpn use before no-fallback test exits 0"
+: > "$MOCK_FREE_LIMIT_FILE"
+MOCK_RUN_MODE=freelimit-once
+export MOCK_RUN_MODE
+run_capture "$OCX" run --vpn-rotate "hello"
+assert_eq "$RC" 0 "run --vpn-rotate works without --fallback"
+assert_contains "$OUTPUT" "OK after VPN rotate" "no-fallback rotate prints retry output"
+assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-02" "no-fallback rotate advances to vn-02"
+
+# Free limit lặp lại: xoay nhiều lần, vẫn giữ model
+run_capture "$OCX" vpn use vn-01
+: > "$MOCK_FREE_LIMIT_FILE"
+MOCK_RUN_MODE=freelimit-twice
+export MOCK_RUN_MODE
+run_capture "$OCX" run --fallback --vpn-rotate --vpn-rotate-max 5 "hello"
+assert_eq "$RC" 0 "run --vpn-rotate succeeds after two rotations"
+assert_contains "$OUTPUT" "OK after two VPN rotations" "repeated rotation reaches model success"
+assert_contains "$OUTPUT" "xoay VPN trong region hiện tại: vn (1/5)" "first rotation shows attempt count"
+assert_contains "$OUTPUT" "xoay VPN trong region hiện tại: vn (2/5)" "second rotation shows attempt count"
+assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-03" "repeated rotation advances to vn-03"
+
+# Fixed model: không fallback sang model khác khi đã hết lượt xoay
+run_capture "$OCX" vpn use vn-01
+MOCK_RUN_MODE=freelimit-primary-always
+export MOCK_RUN_MODE
+run_capture "$OCX" run --fallback --vpn-rotate --vpn-rotate-max 1 "hello"
+assert_eq "$RC" 1 "fixed-model mode stops after vpn max"
+assert_contains "$OUTPUT" "giữ model cố định" "fixed-model mode explains no model fallback"
+assert_not_contains "$OUTPUT" "OK from fallback" "fixed-model mode does not switch model"
+assert_not_contains "$OUTPUT" "(2/" "fixed-model mode only runs selected model"
+assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-02" "fixed-model mode still rotates VPN"
+
+# Timeout model -> rotate VPN -> retry
+run_capture "$OCX" vpn use vn-01
+MOCK_RUN_MODE=timeout-once
+export MOCK_RUN_MODE
+run_capture "$OCX" run --fallback --vpn-rotate --run-timeout 1 "hello"
+assert_eq "$RC" 0 "run --vpn-rotate recovers from model timeout"
+assert_contains "$OUTPUT" "model không phản hồi (timeout)" "timeout is classified before retry"
+assert_contains "$OUTPUT" "OK after timeout rotate" "timeout retry succeeds"
+assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-02" "timeout rotation advances VPN"
+
+# Profile lỗi khi xoay: tự chuyển profile kế tiếp
+run_capture "$OCX" vpn use vn-01
+: > "$MOCK_FREE_LIMIT_FILE"
+MOCK_RUN_MODE=freelimit-once
+MOCK_FAIL_PROFILE=vn-02
+export MOCK_RUN_MODE MOCK_FAIL_PROFILE
+run_capture "$OCX" run --fallback --vpn-rotate "hello"
+assert_eq "$RC" 0 "run --vpn-rotate skips failed VPN profile"
+assert_contains "$OUTPUT" "VPN vn/vn-02 không kết nối được" "failed VPN profile logs skip"
+assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-03" "rotation continues to next profile"
+unset MOCK_FAIL_PROFILE
 MOCK_RUN_MODE=normal
 export MOCK_RUN_MODE
 

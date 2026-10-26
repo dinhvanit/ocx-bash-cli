@@ -52,7 +52,7 @@ _ocx() {
       esac
       ;;
     run)
-      COMPREPLY=( $(compgen -W "-m --model --fallback --vpn-rotate --vpn-on-free-limit --vpn-region --help" -- "$cur") )
+      COMPREPLY=( $(compgen -W "-m --model --fallback --vpn-rotate --vpn-on-free-limit --vpn-region --vpn-rotate-max --vpn-max --vpn-timeout --run-timeout --help" -- "$cur") )
       ;;
     start)
       COMPREPLY=( $(compgen -W "--mini --auto --dir --dry-run --force --help" -- "$cur") )

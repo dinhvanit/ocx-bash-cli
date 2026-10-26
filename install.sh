@@ -78,7 +78,7 @@ case ":$PATH:" in
 esac
 
 missing=()
-for c in opencode curl jq sudo; do
+for c in opencode curl jq sudo timeout; do
   command -v "$c" >/dev/null 2>&1 || missing+=("$c")
 done
 if ((${#missing[@]} > 0)); then
