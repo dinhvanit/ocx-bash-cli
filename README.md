@@ -48,7 +48,7 @@ Sau khi cài:
 ├── vpn/<region>/<name>.ovpn
 └── wireguard/<region>/<name>.conf
 ~/.cache/ocx/                            # log, cache, pidfile, lock
-~/.local/state/ocx/                      # state, health history
+~/.local/state/ocx/                      # state, health history, mark limit/fail
 ```
 
 ---
@@ -216,12 +216,36 @@ ocx vpn regions
 ```
 
 Cột `*` là profile đang kết nối. `HEALTH` là kết quả kiểm tra gần nhất.
+Cột `MARK` lưu đánh dấu của `ocx`:
+
+- `limit/<tuổi>`: profile đã gặp `Free usage limit reached`. Mark này **tự hết
+  hạn sau 0h UTC** (sang ngày UTC mới), vì thường quota free được làm mới theo
+  ngày.
+- `fail/<tuổi>`: profile kết nối lỗi. Mark này hết hạn sau
+  `OCX_VPN_FAIL_TTL` giây (mặc định 86400 = 24 giờ), hoặc được xoá ngay khi
+  profile kết nối lại thành công.
+- `-`: chưa có mark, profile sẽ được thử khi xoay.
+
 Cột đầu là số thứ tự; có thể dùng số này thay cho tên dài:
 
 ```bash
 ocx vpn use 3
 ocx vpn test 3
 ```
+
+Reset mark thủ công:
+
+```bash
+ocx vpn reset --limit          # xoá mark hết quota, giữ mark fail
+ocx vpn reset --fail           # xoá mark kết nối lỗi
+ocx vpn reset --all            # xoá cả hai
+ocx vpn reset --limit --region vn
+ocx vpn reset --limit vn/vn-01
+```
+
+`ocx run --vpn-rotate` chỉ chọn các profile **chưa bị mark** trong region xoay.
+Nếu tất cả đã bị mark, `ocx` dừng và báo chờ 0h UTC hoặc reset. Profile đang
+dùng mà model trả lời thành công sẽ được xoá mark `limit`/`fail`.
 
 ### 5.3 Kết nối và xoay
 
@@ -277,6 +301,7 @@ ocx vpn log 100
 
 - IPv4 public hiện tại;
 - backend, profile, file, thời điểm kết nối;
+- mark `limit`/`fail` hiện tại (nếu có);
 - process OpenVPN hoặc interface WireGuard còn sống không;
 - health check gần nhất.
 
@@ -305,6 +330,9 @@ Sau khi backend khởi động, `ocx`:
 2. gọi lần lượt các endpoint trong `OCX_HEALTH_URLS` để lấy IPv4 public;
 3. so sánh với IP trước khi kết nối;
 4. ghi kết quả vào `~/.local/state/ocx/vpn-health.tsv`.
+
+Profile lỗi kết nối và profile hết quota được lưu riêng trong
+`~/.local/state/ocx/vpn-marks.tsv` (cột `MARK` khi `vpn list`).
 
 Mặc định IP không đổi chỉ là **cảnh báo**, không fail. Muốn coi là fail:
 
@@ -405,6 +433,10 @@ Cơ chế:
 - tuyệt đối **không xoay/retry nếu đã có tool call**;
 - mỗi lần xoay thử một profile; profile lỗi/timeout thì chuyển ngay profile kế
   tiếp, không chờ hết failover của cả region;
+- khi gặp `free_limit`, profile đang dùng được đánh dấu `limit`; khi kết nối
+  lỗi, profile được đánh dấu `fail`. Các lần xoay sau bỏ qua profile đã mark;
+- mark `limit` tự hết hạn sau 0h UTC; mark `fail` hết hạn sau
+  `OCX_VPN_FAIL_TTL` (mặc định 24h) hoặc khi kết nối lại thành công;
 - xoay tối đa `--vpn-rotate-max` lần (mặc định 20; `0` = không giới hạn);
 - mỗi lần kết nối/kiểm tra IP có timeout `--vpn-timeout` (mặc định 30 giây);
 - mỗi lần gọi OpenCode có timeout `--run-timeout` (mặc định 180 giây; `0` = tắt);
@@ -421,6 +453,7 @@ OCX_RUN_VPN_ON_FREE_LIMIT=1
 OCX_RUN_VPN_MAX=20              # 0 = không giới hạn
 OCX_RUN_VPN_TIMEOUT=30          # timeout mỗi lần kết nối/kiểm tra IP
 OCX_RUN_TIMEOUT=180             # timeout mỗi lần gọi OpenCode; 0 = tắt
+OCX_VPN_FAIL_TTL=86400          # bỏ qua profile lỗi trong 24h; 0 = giữ đến khi reset
 ```
 
 `--fallback` chạy `opencode run --format json`, đọc event và chỉ retry khi:
@@ -510,6 +543,7 @@ OCX_RUN_VPN_REGION=""
 OCX_RUN_VPN_MAX=20             # 0 = không giới hạn
 OCX_RUN_VPN_TIMEOUT=30         # timeout mỗi lần kết nối/kiểm tra IP
 OCX_RUN_TIMEOUT=180            # timeout mỗi lần gọi OpenCode; 0 = tắt
+OCX_VPN_FAIL_TTL=86400         # bỏ qua profile lỗi trong 24h; 0 = giữ đến khi reset
 ```
 
 - `OCX_SUDO=none` chỉ dùng khi bạn đã cấu hình quyền phù hợp (ví dụ chạy bằng
@@ -520,6 +554,9 @@ OCX_RUN_TIMEOUT=180            # timeout mỗi lần gọi OpenCode; 0 = tắt
   hiện tại.
 - `OCX_RUN_VPN_MAX`, `OCX_RUN_VPN_TIMEOUT`, `OCX_RUN_TIMEOUT` giới hạn số lần
   xoay và thời gian chờ; có thể override bằng cờ dòng lệnh.
+- `OCX_VPN_FAIL_TTL` là thời gian bỏ qua profile bị lỗi kết nối; đặt `0` nếu
+  muốn giữ mark fail cho đến khi `ocx vpn reset --fail` hoặc kết nối lại thành
+  công.
 - Xoay VPN không làm mới quota tài khoản; đây chỉ là thay đổi egress IP. Nếu
   provider vẫn báo hết quota, hãy dùng model/provider khác mà bạn có quyền.
 
@@ -619,7 +656,7 @@ Bộ test dùng mock, không gọi mạng thật, không đốt quota:
 ./tests/run-tests.sh
 ```
 
-Kết quả hiện tại: 100 pass, 0 fail.
+Kết quả hiện tại: 130 pass, 0 fail.
 
 ---
 

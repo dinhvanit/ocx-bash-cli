@@ -642,6 +642,13 @@ model_run() {
       rc="$(cat "$rcfile" 2>/dev/null || printf 1)"
       printf '\n'
       if [[ "$rc" == "0" ]]; then
+        # Model trả lời được với VPN hiện tại: xoá mark limit/fail của profile
+        # này để lần sau không bỏ qua một IP vẫn còn dùng được.
+        state_load
+        if [[ -n "${ACTIVE_PROFILE:-}" ]]; then
+          vpn_mark_clear "$ACTIVE_PROFILE" "limit" || true
+          vpn_mark_clear "$ACTIVE_PROFILE" "fail" || true
+        fi
         success=1
         break 2
       fi
@@ -664,6 +671,16 @@ model_run() {
       # `timeout` trả 124 khi tiến trình không phản hồi.
       if [[ "$rc" == "124" ]]; then
         kind="timeout"
+      fi
+
+      # Đánh dấu profile đang dùng là hết quota để các lần xoay sau bỏ qua.
+      # Chỉ mark khi có VPN do ocx quản lý; không mark nếu model chạy trực tiếp.
+      if [[ "$kind" == "free_limit" ]]; then
+        state_load
+        if [[ -n "${ACTIVE_PROFILE:-}" ]]; then
+          vpn_mark_record "$ACTIVE_PROFILE" "limit" "free usage limit" || true
+          info "đánh dấu limit: $ACTIVE_PROFILE"
+        fi
       fi
 
       # Xoay VPN khi free limit, timeout hoặc lỗi mạng, nhưng tuyệt đối không
@@ -694,10 +711,21 @@ model_run() {
           fi
         fi
 
-        local rotated=0 target
-        while (( vpn_max == 0 || vpn_attempts < vpn_max )); do
+        local rotated=0 target scanned=0
+        local before_attempts="$vpn_attempts"
+        while (( scanned < ${#vpn_names[@]} )) \
+          && (( vpn_max == 0 || vpn_attempts < vpn_max )); do
           target="${vpn_names[$vpn_index]}"
           vpn_index=$(( (vpn_index + 1) % ${#vpn_names[@]} ))
+          scanned=$((scanned + 1))
+
+          # Bỏ qua profile đã được đánh dấu limit (trong ngày UTC) hoặc fail
+          # (trong OCX_VPN_FAIL_TTL), để xoay sang IP chưa thử.
+          if vpn_mark_blocked "$target"; then
+            info "bỏ qua $target ($(vpn_mark_label "$target"))"
+            continue
+          fi
+
           vpn_attempts=$((vpn_attempts + 1))
           if (( vpn_max > 0 )); then
             info "xoay VPN trong $vpn_region_label (${vpn_attempts}/${vpn_max})"
@@ -714,7 +742,13 @@ model_run() {
           info "đã xoay VPN; thử lại model $m"
           continue
         fi
-        warn "không xoay được VPN sau $vpn_attempts lần; dừng"
+        if (( vpn_attempts == before_attempts )); then
+          warn "không còn profile chưa đánh dấu trong $vpn_region_label"
+          warn "mark limit tự hết hạn sau 0h UTC; reset sớm: ocx vpn reset --limit"
+          warn "nếu profile bị fail: ocx vpn reset --fail"
+        else
+          warn "không xoay được VPN sau $((vpn_attempts - before_attempts)) lần thử; dừng"
+        fi
         break
       fi
       break

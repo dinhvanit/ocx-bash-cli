@@ -17,6 +17,7 @@ OCX_WG_DIR="${OCX_WG_DIR:-$OCX_CONFIG_DIR/wireguard}"
 OCX_LOG_DIR="${OCX_LOG_DIR:-$OCX_CACHE_DIR/log}"
 OCX_STATE_FILE="${OCX_STATE_FILE:-$OCX_STATE_DIR/vpn.state}"
 OCX_HEALTH_FILE="${OCX_HEALTH_FILE:-$OCX_STATE_DIR/vpn-health.tsv}"
+OCX_VPN_MARK_FILE="${OCX_VPN_MARK_FILE:-$OCX_STATE_DIR/vpn-marks.tsv}"
 OCX_MODELS_CACHE="${OCX_MODELS_CACHE:-$OCX_CACHE_DIR/opencode-models.txt}"
 OCX_LOCK_FILE="${OCX_LOCK_FILE:-$OCX_CACHE_DIR/ocx.lock}"
 OCX_OPENVPN_PID_FILE="${OCX_OPENVPN_PID_FILE:-$OCX_CACHE_DIR/openvpn.pid}"
@@ -55,6 +56,9 @@ OCX_RUN_VPN_TIMEOUT="${OCX_RUN_VPN_TIMEOUT:-30}"
 # Timeout cho mỗi lần gọi `opencode run` (giây); 0 = tắt timeout.
 OCX_RUN_TIMEOUT="${OCX_RUN_TIMEOUT:-180}"
 OCX_HEALTH_KEEP="${OCX_HEALTH_KEEP:-500}"
+# Thời gian (giây) một profile bị đánh dấu connect fail được bỏ qua.
+# 0 = giữ đánh dấu cho đến khi reset hoặc kết nối thành công.
+OCX_VPN_FAIL_TTL="${OCX_VPN_FAIL_TTL:-86400}"
 # Cảnh báo/không nối nếu có OpenVPN không do ocx quản lý đang chạy.
 OCX_CHECK_UNMANAGED_VPN="${OCX_CHECK_UNMANAGED_VPN:-1}"
 
@@ -299,8 +303,10 @@ Lệnh chính:
       Xem/đổi model của phiên OpenCode đang chạy qua API.
   ocx fallback
       Alias của `ocx model next` (chuyển phiên active sang model kế tiếp).
-  ocx vpn list|regions|import|use|next|random|region|auto|test|status|disconnect|log
+  ocx vpn list|regions|import|use|next|random|region|auto|test|status|disconnect|log|reset
       Quản lý profile VPN OpenVPN/WireGuard.
+  ocx vpn reset [--limit|--fail|--all] [--region R] [profile...]
+      Xoá mark limit/fail. Mark limit cũng tự hết hạn sau 0h UTC.
   ocx doctor
       Kiểm tra phụ thuộc, cấu hình, profile và API OpenCode.
   ocx version
@@ -339,6 +345,12 @@ Cách dùng ocx vpn:
   ocx vpn status
   ocx vpn disconnect [--all]
   ocx vpn log [lines]
+  ocx vpn reset [--limit|--fail|--all] [--region R] [profile...]
+
+MARK trong `vpn list`:
+  limit  profile đã gặp free usage limit; tự hết hạn sau 0h UTC.
+  fail   profile kết nối lỗi; hết hạn sau OCX_VPN_FAIL_TTL (mặc định 24h).
+  `ocx run --vpn-rotate` chỉ xoay sang profile chưa bị mark.
 
 Profile OpenVPN:   ~/.config/ocx/vpn/<region>/<name>.ovpn
 Profile WireGuard: ~/.config/ocx/wireguard/<region>/<name>.conf

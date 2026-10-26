@@ -26,6 +26,7 @@ vpn_dispatch() {
     list)        vpn_list "$@" ;;
     regions)     vpn_regions "$@" ;;
     import)      vpn_import "$@" ;;
+    reset|unmark|clear) with_lock vpn_reset "$@" ;;
     use)         with_lock vpn_use "$@" ;;
     next|rotate) with_lock vpn_next "$@" ;;
     random)      with_lock vpn_random "$@" ;;

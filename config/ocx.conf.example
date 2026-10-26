@@ -49,6 +49,10 @@ OCX_RUN_VPN_TIMEOUT=30
 # Timeout cho mỗi lần gọi `opencode run` (giây). 0 = tắt timeout.
 OCX_RUN_TIMEOUT=180
 
+# Profile bị lỗi kết nối được bỏ qua trong bao lâu (giây).
+# 0 = giữ mark fail cho đến khi kết nối lại thành công hoặc `ocx vpn reset --fail`.
+OCX_VPN_FAIL_TTL=86400
+
 # Các endpoint kiểm tra IPv4 public. ocx thử lần lượt.
 OCX_HEALTH_URLS=(
   "https://api.ipify.org"

@@ -11,7 +11,7 @@ _ocx() {
 
   local commands="start tui run models model fallback vpn doctor version help"
   local model_subs="list current switch use next auto fallback help"
-  local vpn_subs="list regions import use next rotate random region use-region auto test status disconnect stop log logs help"
+  local vpn_subs="list regions import use next rotate random region use-region auto test status disconnect stop log logs reset unmark clear help"
 
   if (( COMP_CWORD == 1 )); then
     COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
@@ -47,6 +47,13 @@ _ocx() {
         next|rotate)
           if (( COMP_CWORD >= 3 )); then
             COMPREPLY=( $(compgen -W "--region --same-region --backend --random --no-failover --failover --help" -- "$cur") )
+          fi
+          ;;
+        reset|unmark|clear)
+          if (( COMP_CWORD >= 3 )); then
+            local names
+            names="$(ocx vpn list 2>/dev/null | awk 'NR>1 {for (i=1; i<=NF; i++) if ($i ~ /\//) {print $i; break}}')"
+            COMPREPLY=( $(compgen -W "--limit --fail --all --region --help $names" -- "$cur") )
           fi
           ;;
       esac

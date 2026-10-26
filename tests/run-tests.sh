@@ -430,6 +430,7 @@ assert_contains "$(cat "$OCX_STATE_FILE")" "jp/jp-01" "vpn next failover reaches
 unset MOCK_FAIL_PROFILE
 
 # Free usage limit -> rotate VPN in current region -> retry same model
+run_capture "$OCX" vpn reset --all
 run_capture "$OCX" vpn use vn-01
 assert_eq "$RC" 0 "vpn use before free-limit test exits 0"
 MOCK_RUN_MODE=freelimit-once
@@ -442,6 +443,7 @@ assert_contains "$OUTPUT" "xoay VPN trong region hiện tại: vn" "free-limit r
 assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-02" "free-limit rotation advances within vn"
 
 # Free usage limit sau tool call: tuyệt đối không tự xoay/retry
+run_capture "$OCX" vpn reset --all
 run_capture "$OCX" vpn use vn-01
 assert_eq "$RC" 0 "vpn use before free-limit tool-call test exits 0"
 MOCK_RUN_MODE=freelimit-toolfail
@@ -452,6 +454,7 @@ assert_contains "$OUTPUT" "KHÔNG tự retry" "free-limit tool call refuses retr
 assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-01" "free-limit tool call does not rotate VPN"
 
 # Free usage limit -> xoay trong region chỉ định
+run_capture "$OCX" vpn reset --all
 run_capture "$OCX" vpn use vn-01
 : > "$MOCK_FREE_LIMIT_FILE"
 MOCK_RUN_MODE=freelimit-once
@@ -463,6 +466,7 @@ assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|jp/jp-01" "free-limit rotati
 
 # --vpn-rotate không bắt buộc --fallback; giữ nguyên model đã chọn
 add_profile vn vn-03
+run_capture "$OCX" vpn reset --all
 run_capture "$OCX" vpn use vn-01
 assert_eq "$RC" 0 "vpn use before no-fallback test exits 0"
 : > "$MOCK_FREE_LIMIT_FILE"
@@ -474,6 +478,7 @@ assert_contains "$OUTPUT" "OK after VPN rotate" "no-fallback rotate prints retry
 assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-02" "no-fallback rotate advances to vn-02"
 
 # Free limit lặp lại: xoay nhiều lần, vẫn giữ model
+run_capture "$OCX" vpn reset --all
 run_capture "$OCX" vpn use vn-01
 : > "$MOCK_FREE_LIMIT_FILE"
 MOCK_RUN_MODE=freelimit-twice
@@ -486,6 +491,7 @@ assert_contains "$OUTPUT" "xoay VPN trong region hiện tại: vn (2/5)" "second
 assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-03" "repeated rotation advances to vn-03"
 
 # Fixed model: không fallback sang model khác khi đã hết lượt xoay
+run_capture "$OCX" vpn reset --all
 run_capture "$OCX" vpn use vn-01
 MOCK_RUN_MODE=freelimit-primary-always
 export MOCK_RUN_MODE
@@ -497,6 +503,7 @@ assert_not_contains "$OUTPUT" "(2/" "fixed-model mode only runs selected model"
 assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-02" "fixed-model mode still rotates VPN"
 
 # Timeout model -> rotate VPN -> retry
+run_capture "$OCX" vpn reset --all
 run_capture "$OCX" vpn use vn-01
 MOCK_RUN_MODE=timeout-once
 export MOCK_RUN_MODE
@@ -507,6 +514,7 @@ assert_contains "$OUTPUT" "OK after timeout rotate" "timeout retry succeeds"
 assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-02" "timeout rotation advances VPN"
 
 # Profile lỗi khi xoay: tự chuyển profile kế tiếp
+run_capture "$OCX" vpn reset --all
 run_capture "$OCX" vpn use vn-01
 : > "$MOCK_FREE_LIMIT_FILE"
 MOCK_RUN_MODE=freelimit-once
@@ -535,6 +543,99 @@ assert_contains "$(cat "$OCX_STATE_FILE")" "wireguard|us/us-01" "wireguard state
 run_capture "$OCX" vpn disconnect
 assert_eq "$RC" 0 "wireguard disconnect exits 0"
 [[ ! -e "$OCX_TEST_WG_FILE" ]] && ok "wireguard interface down" || bad "wireguard interface down"
+
+# Profile marks: limit/fail, skip marked, reset and UTC expiry
+new_env marks
+make_mocks
+add_profile vn vn-01
+add_profile vn vn-02
+add_profile vn vn-03
+MARK_FILE="$OCX_STATE_DIR/vpn-marks.tsv"
+
+run_capture "$OCX" vpn list
+assert_eq "$RC" 0 "marks: vpn list exits 0"
+assert_contains "$OUTPUT" "MARK" "marks: vpn list shows mark column"
+
+# Free limit marks the current profile, then rotation moves to an unmarked one
+run_capture "$OCX" vpn use vn-01
+assert_eq "$RC" 0 "marks: use vn-01 exits 0"
+: > "$MOCK_FREE_LIMIT_FILE"
+MOCK_RUN_MODE=freelimit-once
+export MOCK_RUN_MODE
+run_capture "$OCX" run --vpn-rotate "hello"
+assert_eq "$RC" 0 "marks: free-limit rotation exits 0"
+assert_contains "$(cat "$MARK_FILE" 2>/dev/null || true)" $'vn/vn-01\tlimit' "marks: free limit marks current profile"
+assert_not_contains "$(cat "$MARK_FILE" 2>/dev/null || true)" $'vn/vn-02\tlimit' "marks: successful profile is not marked limit"
+assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-02" "marks: rotation advances to vn-02"
+
+run_capture "$OCX" vpn list
+assert_contains "$OUTPUT" "limit/" "marks: vpn list displays limit mark"
+
+run_capture "$OCX" vpn reset --limit
+assert_eq "$RC" 0 "marks: reset --limit exits 0"
+assert_not_contains "$(cat "$MARK_FILE" 2>/dev/null || true)" "limit" "marks: reset --limit clears limit marks"
+
+# Connection failure marks fail, successful reconnect clears it
+MOCK_FAIL_PROFILE=vn-02
+export MOCK_FAIL_PROFILE
+run_capture "$OCX" vpn use vn-02 --no-failover
+assert_eq "$RC" 1 "marks: failed VPN use exits 1"
+assert_contains "$(cat "$MARK_FILE" 2>/dev/null || true)" $'vn/vn-02\tfail' "marks: connection failure marks profile fail"
+run_capture "$OCX" vpn list
+assert_contains "$OUTPUT" "fail/" "marks: vpn list displays fail mark"
+run_capture "$OCX" vpn reset --fail
+assert_eq "$RC" 0 "marks: reset --fail exits 0"
+assert_not_contains "$(cat "$MARK_FILE" 2>/dev/null || true)" "fail" "marks: reset --fail clears fail marks"
+
+unset MOCK_FAIL_PROFILE
+run_capture "$OCX" vpn use vn-02
+assert_eq "$RC" 0 "marks: reconnect vn-02 exits 0"
+assert_not_contains "$(cat "$MARK_FILE" 2>/dev/null || true)" $'vn/vn-02\tfail' "marks: successful connect clears fail mark"
+
+# Mark vn-01 limit, then rotate from vn-03: vn-01 is skipped, vn-02 is used
+run_capture "$OCX" vpn use vn-01
+: > "$MOCK_FREE_LIMIT_FILE"
+MOCK_RUN_MODE=freelimit-once
+export MOCK_RUN_MODE
+run_capture "$OCX" run --vpn-rotate "hello"
+assert_eq "$RC" 0 "marks: first limit rotation exits 0"
+assert_contains "$(cat "$MARK_FILE" 2>/dev/null || true)" $'vn/vn-01\tlimit' "marks: vn-01 is marked limit"
+
+run_capture "$OCX" vpn use vn-03
+assert_eq "$RC" 0 "marks: use vn-03 exits 0"
+: > "$MOCK_FREE_LIMIT_FILE"
+run_capture "$OCX" run --vpn-rotate "hello"
+assert_eq "$RC" 0 "marks: rotation skips marked vn-01"
+assert_contains "$OUTPUT" "bỏ qua vn/vn-01 (limit/" "marks: marked profile is skipped"
+assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-02" "marks: skips to unmarked vn-02"
+
+# All profiles marked limit: stop instead of retrying them
+MOCK_RUN_MODE=freelimit-primary-always
+export MOCK_RUN_MODE
+run_capture "$OCX" run --vpn-rotate --vpn-rotate-max 50 "hello"
+assert_eq "$RC" 1 "marks: all-marked rotation exits 1"
+assert_contains "$OUTPUT" "không còn profile chưa đánh dấu" "marks: all-marked rotation explains stop"
+assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-02" "marks: all-marked rotation keeps current profile"
+
+# A limit mark older than the current UTC day is ignored
+OLD_TS=$(( $(date +%s) - 86400 ))
+awk -F'\t' -v OFS='\t' -v old="$OLD_TS" \
+  '$1 == "vn/vn-01" && $2 == "limit" { $3 = old } { print }' \
+  "$MARK_FILE" > "$MARK_FILE.tmp" && mv -f "$MARK_FILE.tmp" "$MARK_FILE"
+run_capture "$OCX" vpn list
+assert_not_contains "$(grep 'vn/vn-01' <<< "$OUTPUT")" "limit/" "marks: old limit mark is hidden after UTC day"
+
+# The expired mark makes vn-01 available again; vn-03 remains marked
+: > "$MOCK_FREE_LIMIT_FILE"
+MOCK_RUN_MODE=freelimit-once
+export MOCK_RUN_MODE
+run_capture "$OCX" run --vpn-rotate "hello"
+assert_eq "$RC" 0 "marks: rotation after UTC expiry exits 0"
+assert_contains "$OUTPUT" "thử VPN: vn/vn-01" "marks: expired limit profile is tried again"
+assert_contains "$(cat "$OCX_STATE_FILE")" "openvpn|vn/vn-01" "marks: expired limit allows connecting vn-01"
+
+MOCK_RUN_MODE=normal
+export MOCK_RUN_MODE
 
 # Import
 new_env import

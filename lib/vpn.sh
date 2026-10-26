@@ -85,6 +85,94 @@ active_region() {
 }
 
 # ---------------------------------------------------------------------------
+# Profile marks: limit (hết quota) và fail (kết nối lỗi).
+# Mỗi profile có tối đa một mark hiện tại. Mark limit tự hết hạn khi sang
+# ngày UTC mới; mark fail hết hạn sau OCX_VPN_FAIL_TTL giây.
+# ---------------------------------------------------------------------------
+vpn_mark_lookup() {
+  local profile="$1" file="$OCX_VPN_MARK_FILE"
+  [[ -s "$file" ]] || return 1
+  awk -F'\t' -v p="$profile" '$1 == p { line = $0 } END { if (line != "") print line }' \
+    "$file"
+}
+
+vpn_mark_state() {
+  local line="" state=""
+  line="$(vpn_mark_lookup "$1" 2>/dev/null || true)"
+  [[ -n "$line" ]] || return 1
+  IFS=$'\t' read -r _ state _ _ <<< "$line"
+  printf '%s' "$state"
+}
+
+vpn_mark_record() {
+  local profile="$1" state="$2" note="${3:-}" file="$OCX_VPN_MARK_FILE"
+  local ts tmp
+  [[ -n "$profile" && -n "$state" ]] || return 1
+  mkdir -p "$(dirname "$file")"
+  ts="$(now_epoch)"
+  tmp="$file.tmp.$$"
+  if [[ -s "$file" ]]; then
+    awk -F'\t' -v p="$profile" '$1 != p' "$file" > "$tmp" \
+      || { rm -f "$tmp"; return 1; }
+  else
+    : > "$tmp"
+  fi
+  printf '%s\t%s\t%s\t%s\n' "$profile" "$state" "$ts" "$note" >> "$tmp"
+  chmod 600 "$tmp" 2>/dev/null || true
+  mv -f "$tmp" "$file"
+}
+
+# vpn_mark_clear PROFILE [STATE]
+# STATE rỗng = xoá mọi mark của profile.
+vpn_mark_clear() {
+  local profile="$1" state="${2:-}" file="$OCX_VPN_MARK_FILE" tmp
+  [[ -f "$file" ]] || return 0
+  tmp="$file.tmp.$$"
+  awk -F'\t' -v p="$profile" -v s="$state" \
+    '!($1 == p && (s == "" || $2 == s))' "$file" > "$tmp" \
+    || { rm -f "$tmp"; return 1; }
+  chmod 600 "$tmp" 2>/dev/null || true
+  mv -f "$tmp" "$file"
+}
+
+vpn_mark_effective() {
+  local profile="$1" line ts state age ttl
+  line="$(vpn_mark_lookup "$profile" 2>/dev/null || true)"
+  [[ -n "$line" ]] || return 1
+  IFS=$'\t' read -r _ state ts _ <<< "$line"
+  [[ "$ts" =~ ^[0-9]+$ ]] || return 1
+  case "$state" in
+    limit)
+      [[ "$(date -u -d "@$ts" +%Y-%m-%d 2>/dev/null || true)" == "$(date -u +%Y-%m-%d)" ]]
+      ;;
+    fail)
+      ttl="${OCX_VPN_FAIL_TTL:-86400}"
+      [[ "$ttl" =~ ^[0-9]+$ ]] || ttl=86400
+      (( ttl == 0 )) && return 0
+      age=$(( $(now_epoch) - ts ))
+      (( age >= 0 && age < ttl ))
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+vpn_mark_label() {
+  local profile="$1" line ts state
+  line="$(vpn_mark_lookup "$profile" 2>/dev/null || true)"
+  [[ -n "$line" ]] || { printf -- '-'; return 0; }
+  IFS=$'\t' read -r _ state ts _ <<< "$line"
+  if vpn_mark_effective "$profile"; then
+    printf '%s/%s' "$state" "$(human_age "$ts")"
+  else
+    printf -- '-'
+  fi
+}
+
+vpn_mark_blocked() {
+  vpn_mark_effective "$1"
+}
+
+# ---------------------------------------------------------------------------
 # Profile discovery. Output lines:
 #   backend<TAB>name<TAB>absolute-path<TAB>region
 # name is the relative path without the final extension. This allows both
@@ -501,6 +589,7 @@ connect_entry() {
   esac
   if (( rc != 0 )); then
     health_record "fail" "$name" "" "backend start failed"
+    vpn_mark_record "$name" "fail" "backend start failed" || true
     disconnect_current >/dev/null 2>&1 || true
     state_clear
     return 1
@@ -516,6 +605,7 @@ connect_entry() {
 
   if ! wait_connected "$backend" "$name" "$path" "$old_ip"; then
     health_record "fail" "$name" "" "health check failed"
+    vpn_mark_record "$name" "fail" "health check failed" || true
     disconnect_current >/dev/null 2>&1 || true
     state_clear
     return 1
@@ -526,6 +616,7 @@ connect_entry() {
   state_save
 
   health_record "ok" "$name" "$CONNECTED_IP" "connected"
+  vpn_mark_clear "$name" "fail" || true
   ok "đã kết nối $backend/$name"
   printf 'IPv4 public: %s\n' "$CONNECTED_IP"
   if [[ -n "$old_ip" && "$old_ip" != "$CONNECTED_IP" ]]; then
@@ -619,7 +710,8 @@ vpn_list() {
   # Số thứ tự luôn theo danh sách đầy đủ, để `ocx vpn use <số>` ổn định
   # kể cả khi đang xem danh sách đã lọc.
   local -A index_of=()
-  local entry b n p r mark health okflag ip ts msg age idx key i=0
+  local entry b n p r active mark health okflag ip ts msg age idx key i=0
+  local unmarked=0 mark_limit=0 mark_fail=0
   for entry in "${all_entries[@]}"; do
     i=$((i + 1))
     IFS=$'\t' read -r b n _ _ <<< "$entry"
@@ -634,13 +726,14 @@ vpn_list() {
     return 0
   fi
 
-  printf '%-3s %-2s %-6s %-9s %-50s %-10s %s\n' "#" "" "VÙNG" "BACKEND" "PROFILE" "HEALTH" "IP GẦN NHẤT"
+  printf '%-3s %-2s %-6s %-9s %-50s %-10s %-12s %s\n' \
+    "#" "" "VÙNG" "BACKEND" "PROFILE" "HEALTH" "MARK" "IP GẦN NHẤT"
   for entry in "${entries[@]}"; do
     IFS=$'\t' read -r b n p r <<< "$entry"
     key="$b|$n"
     idx="${index_of[$key]:-0}"
-    mark=" "
-    [[ "$n" == "$current" ]] && mark="*"
+    active=" "
+    [[ "$n" == "$current" ]] && active="*"
     health="$(health_lookup "$n" 2>/dev/null || true)"
     if [[ -n "$health" ]]; then
       IFS=$'\t' read -r ts okflag _ ip msg <<< "$health"
@@ -650,9 +743,18 @@ vpn_list() {
       ip="-"; health="-"
     fi
     [[ -n "$ip" ]] || ip="-"
-    printf '%-3s %-2s %-6s %-9s %-50s %-10s %s\n' "$idx" "$mark" "$r" "$b" "$n" "$health" "$ip"
+    mark="$(vpn_mark_label "$n")"
+    case "$mark" in
+      -)       unmarked=$((unmarked + 1)) ;;
+      limit/*) mark_limit=$((mark_limit + 1)) ;;
+      fail/*)  mark_fail=$((mark_fail + 1)) ;;
+    esac
+    printf '%-3s %-2s %-6s %-9s %-50s %-10s %-12s %s\n' \
+      "$idx" "$active" "$r" "$b" "$n" "$health" "$mark" "$ip"
   done
-  printf '\nTổng: %d profile. (* = đang kết nối)\n' "${#entries[@]}"
+  printf '\nTổng: %d profile (chưa mark: %d, limit: %d, fail: %d). (* = đang kết nối)\n' \
+    "${#entries[@]}" "$unmarked" "$mark_limit" "$mark_fail"
+  printf 'Mark limit tự hết hạn sau 0h UTC. Reset sớm: ocx vpn reset --limit\n'
   printf 'Chọn nhanh theo số: ocx vpn use <số>\n'
 }
 
@@ -751,6 +853,52 @@ vpn_import() {
     printf 'Đã import: %s (%s/%s)\n' "$dest" "$backend" "$region"
   done
   printf 'Đã import %d profile. Xem bằng: ocx vpn list\n' "$imported"
+}
+
+vpn_reset() {
+  local mode="limit" region="" arg
+  local -a queries=()
+  while (($#)); do
+    case "$1" in
+      --limit) mode="limit"; shift ;;
+      --fail) mode="fail"; shift ;;
+      --all) mode="all"; shift ;;
+      --region) region="$(normalize_region "${2:-}")"; shift 2 ;;
+      -h|--help) usage_vpn; return 0 ;;
+      -*) die "tham số không hợp lệ cho vpn reset: $1" ;;
+      *) queries+=("$1"); shift ;;
+    esac
+  done
+
+  local -a names=()
+  local entry backend name path r
+  if ((${#queries[@]} > 0)); then
+    for arg in "${queries[@]}"; do
+      entry="$(profile_resolve "$arg")" || return $?
+      IFS=$'\t' read -r backend name path r <<< "$entry"
+      names+=("$name")
+    done
+  else
+    mapfile -t names < <(profile_names "$region")
+  fi
+
+  local state count=0
+  for name in "${names[@]}"; do
+    state="$(vpn_mark_state "$name" 2>/dev/null || true)"
+    [[ -n "$state" ]] || continue
+    case "$mode" in
+      limit) [[ "$state" == "limit" ]] || continue ;;
+      fail)  [[ "$state" == "fail" ]] || continue ;;
+      all)   ;;
+    esac
+    if [[ "$mode" == "all" ]]; then
+      vpn_mark_clear "$name" || true
+    else
+      vpn_mark_clear "$name" "$mode" || true
+    fi
+    count=$((count + 1))
+  done
+  info "đã reset $count mark ($mode${region:+ trong $region})"
 }
 
 vpn_use() {
@@ -899,6 +1047,7 @@ vpn_status() {
   printf 'Vùng:         %s\n' "$(region_from_path "$ACTIVE_PATH" 2>/dev/null || printf '?')"
   printf 'File:         %s\n' "$ACTIVE_PATH"
   printf 'IP lúc nối:   %s\n' "${ACTIVE_IP:--}"
+  printf 'Đánh dấu:     %s\n' "$(vpn_mark_label "$ACTIVE_PROFILE")"
   printf 'Từ lúc:       %s (%s trước)\n' \
     "$(date -d "@${ACTIVE_SINCE:-0}" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || printf '%s' "${ACTIVE_SINCE:-?}")" \
     "$(human_age "${ACTIVE_SINCE:-0}")"
