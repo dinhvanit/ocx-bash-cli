@@ -18,6 +18,7 @@ vpn-profiles/
 ├── es/                  # spain
 ├── gb/                  # wales / United Kingdom
 ├── id/                  # indonesia
+├── in/                  # india
 ├── jp/                  # japan
 ├── kr/                  # korea
 ├── misc/                # profile lỗi/không xác định region
@@ -27,7 +28,7 @@ vpn-profiles/
 ├── th/                  # thailand
 ├── tw/.gitkeep          # taiwan
 ├── uk/.gitkeep          # alias United Kingdom -> gb khi import
-├── us/.gitkeep          # united_state (chưa có file)
+├── us/                  # united_state
 └── vn/                  # vietnam
 ```
 
