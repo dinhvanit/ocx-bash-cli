@@ -1,32 +1,37 @@
 # ocx-bash-cli — OpenCode eXtended CLI
 
-`ocx` là CLI Bash cho Linux, gồm hai phần độc lập:
+**Language:** **English** · [Tiếng Việt](README.vi.md)
+**License:** [GPL-3.0](LICENSE)
 
-1. **Quản lý VPN profile** (OpenVPN `.ovpn`, WireGuard `.conf`): import, liệt kê,
-   chọn, xoay tuần tự/ngẫu nhiên/theo vùng, failover, kiểm tra IP public.
-2. **Quản lý model OpenCode**: alias model, mở phiên với model chỉ định, chuyển
-   model của phiên đang chạy, và `ocx run --fallback` có kiểm soát an toàn.
+`ocx` is a Bash CLI for Linux with two independent parts:
 
-> **Quan trọng:** đổi IP qua VPN **không** làm mới quota tài khoản/model. `ocx`
-> không dùng VPN để né hạn mức. Khi hết quota, hãy chuyển sang model/provider
-> mà bạn có quyền sử dụng. VPN chỉ dùng để quản lý kết nối mạng.
+1. **VPN profile management** (OpenVPN `.ovpn`, WireGuard `.conf`): import, list,
+   select, rotate sequentially/randomly/by region, fail over, check public IP.
+2. **OpenCode model management**: model aliases, start a session with a given
+   model, switch the model of a running session, and a guarded
+   `ocx run --fallback`.
+
+> **Important:** changing your IP through a VPN does **not** reset
+> account/model quota. `ocx` does not use VPNs to evade usage limits. When you
+> hit a quota, switch to a model/provider you are entitled to use. A VPN is
+> only a way to manage network connectivity.
 
 ---
 
-## 1. Cấu trúc dự án
+## 1. Project layout
 
 ```text
 ocx-bash-cli/
 ├── bin/ocx                     # entrypoint
 ├── lib/
-│   ├── common.sh               # cấu hình, state, log, doctor
-│   ├── vpn.sh                  # profile, OpenVPN, WireGuard, rotation
-│   └── models.sh               # model alias, OpenCode API, fallback
+│   ├── common.sh               # config, state, logging, doctor
+│   ├── vpn.sh                  # profiles, OpenVPN, WireGuard, rotation
+│   └── models.sh               # model aliases, OpenCode API, fallback
 ├── config/
 │   ├── ocx.conf.example
 │   └── models.conf.example
 ├── completions/ocx.bash
-├── vpn-profiles/               # kho profile theo region (nội dung bị ignore)
+├── vpn-profiles/               # profile store by region (contents ignored)
 │   ├── README.md
 │   ├── jp/.gitkeep
 │   ├── vn/.gitkeep
@@ -34,10 +39,12 @@ ocx-bash-cli/
 ├── tests/run-tests.sh
 ├── install.sh
 ├── uninstall.sh
-└── README.md
+├── README.md                   # this file (English)
+├── README.vi.md                # Vietnamese guide
+└── LICENSE                     # GPL-3.0
 ```
 
-Sau khi cài:
+After installation:
 
 ```text
 ~/.local/bin/ocx                         # symlink
@@ -47,19 +54,19 @@ Sau khi cài:
 ├── models.conf
 ├── vpn/<region>/<name>.ovpn
 └── wireguard/<region>/<name>.conf
-~/.cache/ocx/                            # log, cache, pidfile, lock
-~/.local/state/ocx/                      # state, health history, mark limit/fail
+~/.cache/ocx/                            # logs, cache, pidfile, lock
+~/.local/state/ocx/                      # state, health history, limit/fail marks
 ```
 
 ---
 
-## 2. Yêu cầu
+## 2. Requirements
 
-- Linux (Ubuntu/Debian khuyến nghị)
-- OpenCode CLI đã cài và đã đăng nhập provider
+- Linux (Ubuntu/Debian recommended)
+- OpenCode CLI installed and logged in to at least one provider
 - `bash` >= 4.4, `curl`, `jq`, `sudo`, `timeout` (coreutils)
-- OpenVPN nếu dùng `.ovpn`
-- `wireguard-tools` nếu dùng `.conf`
+- OpenVPN if you use `.ovpn` profiles
+- `wireguard-tools` if you use `.conf` profiles
 
 Ubuntu/Debian:
 
@@ -68,7 +75,7 @@ sudo apt update
 sudo apt install -y curl jq openvpn wireguard-tools
 ```
 
-Kiểm tra OpenCode:
+Check OpenCode:
 
 ```bash
 opencode --version
@@ -78,9 +85,9 @@ opencode models
 
 ---
 
-## 3. Cài đặt
+## 3. Installation
 
-Clone từ GitHub:
+Clone from GitHub:
 
 ```bash
 git clone https://github.com/dinhvanit/ocx-bash-cli.git
@@ -88,28 +95,28 @@ cd ocx-bash-cli
 ./install.sh
 ```
 
-Hoặc nếu đang đứng trong thư mục dự án:
+Or, from inside the project directory:
 
 ```bash
 ./install.sh
 ```
 
-Script sẽ:
+The script will:
 
-- cài code vào `~/.local/share/ocx`;
+- install the code into `~/.local/share/ocx`;
 - symlink `~/.local/bin/ocx`;
-- tạo `~/.config/ocx/{ocx.conf,models.conf}` nếu chưa có;
-- tạo các thư mục `vpn/vn`, `vpn/jp`, `vpn/us`, ...
-- cài Bash completion.
+- create `~/.config/ocx/{ocx.conf,models.conf}` if missing;
+- create the directories `vpn/vn`, `vpn/jp`, `vpn/us`, ...;
+- install Bash completion.
 
-Nếu `~/.local/bin` chưa có trong `PATH`:
+If `~/.local/bin` is not on your `PATH`:
 
 ```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-Kiểm tra:
+Verify:
 
 ```bash
 ocx doctor
@@ -117,24 +124,24 @@ ocx models
 ocx vpn list
 ```
 
-Chạy lại installer:
+Re-run the installer:
 
 ```bash
-./install.sh            # giữ cấu hình hiện có
-./install.sh --force    # ghi đè models.conf/ocx.conf bằng file mẫu
+./install.sh            # keep existing configuration
+./install.sh --force    # overwrite models.conf/ocx.conf with the examples
 ```
 
 ---
 
-## 4. Cấu hình model OpenCode
+## 4. Configuring OpenCode models
 
-Mở file:
+Open the file:
 
 ```bash
 nano ~/.config/ocx/models.conf
 ```
 
-Mẫu hiện tại dùng các model free của OpenCode:
+The current example uses OpenCode free models:
 
 ```bash
 OCX_MODEL_PRIMARY="opencode/deepseek-v4.1-flash-free"
@@ -157,12 +164,13 @@ declare -A OCX_MODEL_ALIASES=(
 OCX_MODEL_ORDER=(primary glm mimo nemotron bigpickle)
 ```
 
-- Model ID phải khớp `opencode models` hoặc màn hình `/models`.
-- Danh sách model free có thể thay đổi; chạy `ocx models --refresh` sau khi
-  OpenCode cập nhật catalog.
-- Có thể thêm provider khác nếu đã `/connect`, ví dụ OpenRouter, Ollama local.
+- Model IDs must match `opencode models` or the `/models` screen.
+- The free model list can change; run `ocx models --refresh` after OpenCode
+  updates its catalog.
+- You can add other providers if you have `/connect`ed them, e.g. OpenRouter or
+  a local Ollama.
 
-Xem alias và trạng thái:
+Show aliases and status:
 
 ```bash
 ocx models
@@ -170,18 +178,18 @@ ocx models
 
 ---
 
-## 5. Quản lý VPN profile
+## 5. Managing VPN profiles
 
-### 5.1 Import profile
+### 5.1 Importing profiles
 
-Từ các thư mục hiện có:
+From existing directories:
 
 ```bash
 ocx vpn import ~/Workspace/test/vpn_vn --region vn
 ocx vpn import ~/Workspace/test/japan --region jp
 ```
 
-Import một file hoặc đổi tên:
+Import a single file, or rename it:
 
 ```bash
 ocx vpn import ~/Downloads/foo.ovpn --region us --name us-gate-01
@@ -193,20 +201,20 @@ Import WireGuard:
 ocx vpn import ~/Downloads/wg-us.conf --region us
 ```
 
-Nếu không truyền `--region`, `ocx` cố suy ra từ tên thư mục hoặc tên file
-(`vpn_vn` → `vn`, `japan` → `jp`, `us-01` → `us`). Nếu không chắc, hãy truyền
-`--region`.
+If `--region` is omitted, `ocx` tries to infer it from the directory or file
+name (`vpn_vn` → `vn`, `japan` → `jp`, `us-01` → `us`). When unsure, pass
+`--region` explicitly.
 
-Trong dự án có sẵn thư mục `vpn-profiles/<region>/` để lưu bản sao profile.
-Các file `.ovpn`/`.conf` trong đó bị `.gitignore` chặn; chỉ `.gitkeep` và
-`README.md` được commit. Import từ kho này:
+The repository ships a `vpn-profiles/<region>/` directory for storing profile
+copies. `.ovpn`/`.conf` files inside it are ignored by `.gitignore`; only
+`.gitkeep` and `README.md` are committed. Import from this store:
 
 ```bash
 ocx vpn import vpn-profiles/jp --region jp
 ocx vpn import vpn-profiles/vn --region vn
 ```
 
-### 5.2 Xem danh sách
+### 5.2 Listing profiles
 
 ```bash
 ocx vpn list
@@ -215,189 +223,194 @@ ocx vpn list --backend wireguard
 ocx vpn regions
 ```
 
-Cột `*` là profile đang kết nối. `HEALTH` là kết quả kiểm tra gần nhất.
-Cột `MARK` lưu đánh dấu của `ocx`:
+The `*` column marks the connected profile. `HEALTH` is the latest health check
+result. The `MARK` column stores `ocx` bookkeeping:
 
-- `limit/<tuổi>`: profile đã gặp `Free usage limit reached`. Mark này **tự hết
-  hạn sau 0h UTC** (sang ngày UTC mới), vì thường quota free được làm mới theo
-  ngày.
-- `fail/<tuổi>`: profile kết nối lỗi. Mark này hết hạn sau
-  `OCX_VPN_FAIL_TTL` giây (mặc định 86400 = 24 giờ), hoặc được xoá ngay khi
-  profile kết nối lại thành công.
-- `-`: chưa có mark, profile sẽ được thử khi xoay.
+- `limit/<age>`: the profile hit `Free usage limit reached`. This mark **expires
+  automatically at 00:00 UTC** (start of the next UTC day), because free quota
+  is usually refreshed daily.
+- `fail/<age>`: the profile failed to connect. This mark expires after
+  `OCX_VPN_FAIL_TTL` seconds (default 86400 = 24 hours), or is cleared as soon
+  as the profile connects successfully.
+- `-`: no mark; the profile will be tried during rotation.
 
-Cột đầu là số thứ tự; có thể dùng số này thay cho tên dài:
+The first column is an index; you can use it instead of long names:
 
 ```bash
 ocx vpn use 3
 ocx vpn test 3
 ```
 
-Reset mark thủ công:
+Reset marks manually:
 
 ```bash
-ocx vpn reset --limit          # xoá mark hết quota, giữ mark fail
-ocx vpn reset --fail           # xoá mark kết nối lỗi
-ocx vpn reset --all            # xoá cả hai
+ocx vpn reset --limit          # clear quota marks, keep fail marks
+ocx vpn reset --fail           # clear connection-failure marks
+ocx vpn reset --all            # clear both
 ocx vpn reset --limit --region vn
 ocx vpn reset --limit vn/vn-01
 ```
 
-`ocx run --vpn-rotate` chỉ chọn các profile **chưa bị mark** trong region xoay.
-Nếu tất cả đã bị mark, `ocx` dừng và báo chờ 0h UTC hoặc reset. Profile đang
-dùng mà model trả lời thành công sẽ được xoá mark `limit`/`fail`.
+`ocx run --vpn-rotate` only picks profiles that are **not marked** in the
+rotation region. If every profile is marked, `ocx` stops and tells you to wait
+for 00:00 UTC or reset the marks. If the current profile lets the model answer
+successfully, its `limit`/`fail` mark is cleared.
 
-### 5.3 Kết nối và xoay
+### 5.3 Connecting and rotating
 
 ```bash
-# Chọn đúng một profile (tên hoặc số thứ tự)
+# Select exactly one profile (name or index)
 ocx vpn use vn-01
 ocx vpn use 3
 
-# Profile kế tiếp trong danh sách (mặc định có failover)
+# Next profile in the list (failover enabled by default)
 ocx vpn next
 
-# Ngẫu nhiên
+# Random profile
 ocx vpn random
 
-# Theo vùng: xoay trong region jp
+# By region: rotate within region jp
 ocx vpn region jp
 
-# Xoay trong đúng region đang kết nối, không nhảy sang region khác
+# Rotate within the currently connected region only
 ocx vpn next --same-region
 
-# Thử lần lượt từ đầu danh sách
+# Try the list from the top, one by one
 ocx vpn auto
 ```
 
-Thứ tự xoay là thứ tự trong `ocx vpn list` (theo vùng rồi tên profile). Nếu
-profile hiện tại là profile cuối, `next` quay lại profile đầu. `--same-region`
-lấy region từ profile đang được `ocx` quản lý; nếu chưa có VPN active, hãy dùng
-`--region R`.
+Rotation order follows `ocx vpn list` (by region, then profile name). If the
+current profile is the last one, `next` wraps around to the first.
+`--same-region` takes the region from the profile managed by `ocx`; if no VPN is
+active, use `--region R`.
 
-Mặc định `OCX_FAILOVER=1`: nếu profile được chọn không lên hoặc health check
-thất bại, `ocx` thử profile kế tiếp cho đến hết danh sách. Tắt:
+`OCX_FAILOVER=1` is the default: if the selected profile does not come up or its
+health check fails, `ocx` tries the next profile until the list is exhausted.
+Disable it:
 
 ```bash
 ocx vpn next --no-failover
 ocx vpn use vn-01 --no-failover
 ```
 
-Kiểm tra một profile rồi ngắt:
+Test a profile and then disconnect:
 
 ```bash
 ocx vpn test jp-01
 ocx vpn test jp-01 --keep
 ```
 
-### 5.4 Trạng thái và log
+### 5.4 Status and logs
 
 ```bash
 ocx vpn status
 ocx vpn log 100
 ```
 
-`vpn status` hiển thị:
+`vpn status` shows:
 
-- IPv4 public hiện tại;
-- backend, profile, file, thời điểm kết nối;
-- mark `limit`/`fail` hiện tại (nếu có);
-- process OpenVPN hoặc interface WireGuard còn sống không;
-- health check gần nhất.
+- the current public IPv4 address;
+- backend, profile, file, and connection time;
+- current `limit`/`fail` marks (if any);
+- whether the OpenVPN process or WireGuard interface is still alive;
+- the latest health check.
 
-### 5.5 Ngắt kết nối
+### 5.5 Disconnecting
 
 ```bash
 ocx vpn disconnect
 ocx vpn disconnect --all
 ```
 
-`ocx` chỉ quản lý process/interface do chính nó tạo:
+`ocx` only manages processes/interfaces it created itself:
 
-- OpenVPN: dùng pidfile riêng và kiểm tra command line trước khi gửi tín hiệu.
-- WireGuard: chỉ hạ interface của profile trong thư mục `ocx`.
-- Không chạy `pkill openvpn`, không đụng VPN bạn tự khởi động ngoài `ocx`.
+- OpenVPN: uses its own pidfile and verifies the command line before signalling.
+- WireGuard: only brings down interfaces belonging to profiles inside the `ocx`
+  directory.
+- It never runs `pkill openvpn`, and never touches VPNs you started outside
+  `ocx`.
 
-`--all` quét thêm các process OpenVPN dùng profile nằm trong
-`~/.config/ocx/vpn` và hạ các WireGuard interface tương ứng.
+`--all` additionally scans OpenVPN processes using profiles under
+`~/.config/ocx/vpn` and tears down the matching WireGuard interfaces.
 
-### 5.6 Health check hoạt động thế nào?
+### 5.6 How health checks work
 
-Sau khi backend khởi động, `ocx`:
+After the backend starts, `ocx`:
 
-1. chờ log OpenVPN có `Initialization Sequence Completed`, hoặc interface
-   WireGuard xuất hiện;
-2. gọi lần lượt các endpoint trong `OCX_HEALTH_URLS` để lấy IPv4 public;
-3. so sánh với IP trước khi kết nối;
-4. ghi kết quả vào `~/.local/state/ocx/vpn-health.tsv`.
+1. waits for `Initialization Sequence Completed` in the OpenVPN log, or for the
+   WireGuard interface to appear;
+2. calls each endpoint in `OCX_HEALTH_URLS` in turn to fetch the public IPv4;
+3. compares it with the IP captured before connecting;
+4. records the result in `~/.local/state/ocx/vpn-health.tsv`.
 
-Profile lỗi kết nối và profile hết quota được lưu riêng trong
-`~/.local/state/ocx/vpn-marks.tsv` (cột `MARK` khi `vpn list`).
+Connection failures and exhausted-quota profiles are stored separately in
+`~/.local/state/ocx/vpn-marks.tsv` (the `MARK` column in `vpn list`).
 
-Mặc định IP không đổi chỉ là **cảnh báo**, không fail. Muốn coi là fail:
+By default an unchanged IP is only a **warning**, not a failure. To treat it as
+a failure:
 
 ```bash
 OCX_REQUIRE_IP_CHANGE=1 ocx vpn next
 ```
 
-hoặc đặt trong `~/.config/ocx/ocx.conf`.
+or set it in `~/.config/ocx/ocx.conf`.
 
-VPN Gate miễn phí thường có server chết/quá tải. Failover giúp tự thử profile
-khác, nhưng không đảm bảo mọi profile đều hoạt động.
+Free VPN Gate servers are often dead or overloaded. Failover helps try other
+profiles automatically, but cannot guarantee that every profile works.
 
 ---
 
-## 6. Model fallback cho OpenCode
+## 6. Model fallback for OpenCode
 
-### 6.1 Mở phiên mới với model chỉ định
+### 6.1 Starting a new session with a given model
 
 ```bash
 ocx start                 # primary
 ocx start glm             # alias glm
-ocx start --auto          # model đầu tiên đang có trong catalog
-ocx start --mini glm      # giao diện mini
-ocx start --dry-run glm   # chỉ in session/model, không mở TUI
+ocx start --auto          # first model currently present in the catalog
+ocx start --mini glm      # mini UI
+ocx start --dry-run glm   # print session/model only, do not open the TUI
 ```
 
-`ocx start` tạo một session qua API OpenCode với model đã chọn, sau đó mở TUI
-bằng `opencode --session <id>`. Nhờ vậy model được áp dụng ngay, không cần
-sửa `opencode.json`.
+`ocx start` creates a session through the OpenCode API with the selected model,
+then opens the TUI with `opencode --session <id>`. The model therefore applies
+immediately, without editing `opencode.json`.
 
-Nếu API OpenCode không phản hồi, `ocx` mở TUI mặc định và cảnh báo.
+If the OpenCode API does not respond, `ocx` opens the default TUI and warns you.
 
-### 6.2 Chuyển model trong phiên đang chạy
+### 6.2 Switching the model of a running session
 
-Từ terminal khác (hoặc từ chính máy):
+From another terminal (or from the same machine):
 
 ```bash
 ocx model current
 ocx model switch glm
 ocx model next
-ocx fallback          # alias ngắn của model next
+ocx fallback          # short alias for model next
 ```
 
-- Không cần `--session` nếu chỉ có một phiên active, hoặc biến
-  `OPENCODE_SESSION_ID` đang được đặt.
-- Nếu có nhiều phiên:
+- No `--session` is needed when there is only one active session, or when the
+  `OPENCODE_SESSION_ID` variable is set.
+- With multiple sessions:
 
 ```bash
 ocx model switch glm --session ses_xxx
 ```
 
-Lệnh này gọi API `POST /api/session/<id>/model`; OpenCode sẽ dùng model mới cho
-các lượt tiếp theo, giữ nguyên context của session. Đây là cách thực tế nhất để
-"cứu" một phiên đang dở khi model cũ hết quota. Nếu cache `opencode models`
-cho biết model kế tiếp không tồn tại trong catalog, `ocx` bỏ qua và chọn model
-sau đó; nếu chưa có cache, nó chuyển theo đúng thứ tự.
+This calls `POST /api/session/<id>/model`; OpenCode uses the new model for
+subsequent turns and keeps the session context. It is the most practical way to
+"rescue" a session in progress when the old model runs out of quota. If the
+`opencode models` cache says the next model does not exist in the catalog, `ocx`
+skips it and picks the one after; without a cache it follows the exact order.
 
-### 6.3 Chạy prompt có fallback
+### 6.3 Running a prompt with fallback
 
 ```bash
-ocx run -m primary "Refactor hàm parseToken"
-ocx run --fallback "Refactor hàm parseToken"
+ocx run -m primary "Refactor the parseToken function"
+ocx run --fallback "Refactor the parseToken function"
 ```
 
-Khi gặp lỗi free usage limit của OpenCode:
+When OpenCode reports a free usage limit:
 
 ```text
 Error: Free usage limit reached. Free models work in OpenCode
@@ -405,160 +418,166 @@ Error: Free usage limit reached. Free models work in OpenCode
 https://opencode.ai/go
 ```
 
-có thể cho `ocx` giữ nguyên model, tự xoay VPN và thử lại cho đến khi model
-phản hồi:
+you can ask `ocx` to keep the same model, rotate the VPN, and retry until the
+model answers:
 
 ```bash
-# Giữ model deepseek, xoay trong region hiện tại
-ocx run --fallback --vpn-rotate "Refactor hàm parseToken"
+# Keep the deepseek model, rotate within the current region
+ocx run --fallback --vpn-rotate "Refactor the parseToken function"
 
-# Không cần --fallback; --vpn-rotate tự bật chế độ chạy có kiểm soát
-ocx run --vpn-rotate "Refactor hàm parseToken"
+# --fallback is not required; --vpn-rotate enables the guarded mode itself
+ocx run --vpn-rotate "Refactor the parseToken function"
 
-# Chỉ xoay trong region jp
-ocx run --fallback --vpn-rotate --vpn-region jp "Refactor hàm parseToken"
+# Rotate within region jp only
+ocx run --fallback --vpn-rotate --vpn-region jp "Refactor the parseToken function"
 
-# Tối đa 50 lần xoay; mỗi lần chờ VPN tối đa 20 giây
-ocx run --vpn-rotate --vpn-rotate-max 50 --vpn-timeout 20 "Refactor hàm parseToken"
+# At most 50 rotations; each VPN wait is capped at 20 seconds
+ocx run --vpn-rotate --vpn-rotate-max 50 --vpn-timeout 20 "Refactor the parseToken function"
 
-# Model không phản hồi quá 120 giây thì coi là timeout và xoay VPN
-ocx run --vpn-rotate --run-timeout 120 "Refactor hàm parseToken"
+# Treat a model that does not answer within 120s as a timeout and rotate
+ocx run --vpn-rotate --run-timeout 120 "Refactor the parseToken function"
 ```
 
-Cơ chế:
+Mechanics:
 
-- **giữ cố định model đã chọn** (`-m` hoặc primary); không tự fallback sang
-  model khác trong chế độ `--vpn-rotate`;
-- xoay khi gặp đúng `free_limit`, khi `opencode run` timeout, hoặc lỗi mạng;
-- tuyệt đối **không xoay/retry nếu đã có tool call**;
-- mỗi lần xoay thử một profile; profile lỗi/timeout thì chuyển ngay profile kế
-  tiếp, không chờ hết failover của cả region;
-- khi gặp `free_limit`, profile đang dùng được đánh dấu `limit`; khi kết nối
-  lỗi, profile được đánh dấu `fail`. Các lần xoay sau bỏ qua profile đã mark;
-- mark `limit` tự hết hạn sau 0h UTC; mark `fail` hết hạn sau
-  `OCX_VPN_FAIL_TTL` (mặc định 24h) hoặc khi kết nối lại thành công;
-- xoay tối đa `--vpn-rotate-max` lần (mặc định 20; `0` = không giới hạn);
-- mỗi lần kết nối/kiểm tra IP có timeout `--vpn-timeout` (mặc định 30 giây);
-- mỗi lần gọi OpenCode có timeout `--run-timeout` (mặc định 180 giây; `0` = tắt);
-- mặc định giữ region hiện tại, trừ khi truyền `--vpn-region`;
-- yêu cầu IP public phải đổi (`OCX_REQUIRE_IP_CHANGE=1` cho lần xoay);
-- dừng ở VPN đầu tiên mà model trả lời thành công; nếu hết lượt xoay mà vẫn
-  lỗi thì dừng, không đổi model.
+- **the selected model stays fixed** (`-m` or primary); in `--vpn-rotate` mode
+  it never falls back to another model;
+- it rotates on an exact `free_limit` error, an `opencode run` timeout, or a
+  network error;
+- it **never rotates/retries once a tool call has happened**;
+- each rotation tries one profile; a failed/timed-out profile moves straight to
+  the next one instead of waiting for the whole region's failover;
+- on `free_limit`, the profile in use is marked `limit`; on connection failure
+  it is marked `fail`. Later rotations skip marked profiles;
+- `limit` marks expire at 00:00 UTC; `fail` marks expire after
+  `OCX_VPN_FAIL_TTL` (default 24h) or when the profile reconnects successfully;
+- rotation is capped at `--vpn-rotate-max` attempts (default 20; `0` = unlimited);
+- each connect/IP check has a `--vpn-timeout` limit (default 30s);
+- each OpenCode call has a `--run-timeout` limit (default 180s; `0` = off);
+- the current region is kept unless `--vpn-region` is passed;
+- a changed public IP is required (`OCX_REQUIRE_IP_CHANGE=1` during rotation);
+- it stops at the first VPN where the model answers successfully; if attempts
+  run out and it still fails, it stops without switching models.
 
-Có thể bật mặc định trong `~/.config/ocx/ocx.conf`:
+You can enable this by default in `~/.config/ocx/ocx.conf`:
 
 ```bash
 OCX_RUN_VPN_ON_FREE_LIMIT=1
-# OCX_RUN_VPN_REGION="vn"       # tùy chọn; để trống = giữ region hiện tại
-OCX_RUN_VPN_MAX=20              # 0 = không giới hạn
-OCX_RUN_VPN_TIMEOUT=30          # timeout mỗi lần kết nối/kiểm tra IP
-OCX_RUN_TIMEOUT=180             # timeout mỗi lần gọi OpenCode; 0 = tắt
-OCX_VPN_FAIL_TTL=86400          # bỏ qua profile lỗi trong 24h; 0 = giữ đến khi reset
+# OCX_RUN_VPN_REGION="vn"       # optional; empty = keep the current region
+OCX_RUN_VPN_MAX=20              # 0 = unlimited
+OCX_RUN_VPN_TIMEOUT=30          # per connect/IP-check timeout
+OCX_RUN_TIMEOUT=180             # per OpenCode call timeout; 0 = off
+OCX_VPN_FAIL_TTL=86400          # skip failing profiles for 24h; 0 = keep until reset
 ```
 
-`--fallback` chạy `opencode run --format json`, đọc event và chỉ retry khi:
+`--fallback` runs `opencode run --format json`, reads the events, and only
+retries when:
 
-- lỗi thuộc nhóm **quota**, **model unavailable**, hoặc **rate limit** (rate
-  limit chỉ khi bật `OCX_RUN_FALLBACK_ON_RATE_LIMIT=1`);
-- **chưa có tool call nào** trong lần chạy đó.
+- the error belongs to **quota**, **model unavailable**, or **rate limit**
+  (rate limit only when `OCX_RUN_FALLBACK_ON_RATE_LIMIT=1`);
+- **no tool call has happened** during that run.
 
-Nếu model đã gọi tool (đọc/sửa file, chạy lệnh...), `ocx` **không tự retry** vì
-có thể đã tạo hiệu ứng phụ. Thay vào đó nó in:
+If the model already called a tool (reading/editing files, running commands),
+`ocx` **does not retry automatically**, because side effects may exist. Instead
+it prints:
 
 ```text
-ocx model switch <model-kế-tiếp> --session <session-id>
+ocx model switch <next-model> --session <session-id>
 opencode --session <session-id>
 ```
 
-Bạn kiểm tra `git diff`/`git status`, rồi chuyển model cho đúng session đó.
+Inspect `git diff`/`git status`, then switch the model for that session.
 
-Các nhóm lỗi:
+Error groups:
 
-| Nhóm | Hành động |
+| Group | Action |
 | --- | --- |
-| `free_limit` (Free usage limit reached) | xoay VPN lặp lại nếu bật `--vpn-rotate`; giữ nguyên model, dừng khi model trả lời hoặc hết lượt |
-| `quota` (usage limit, exhausted, billing...) | fallback nếu chưa có tool call |
-| `unavailable` (model not found/no-route) | fallback nếu chưa có tool call |
-| `rate` (429) | mặc định không fallback; bật `OCX_RUN_FALLBACK_ON_RATE_LIMIT=1` nếu muốn |
-| `auth` | dừng, kiểm tra `opencode auth list` / `/connect` |
-| `network` | dừng nếu không bật `--vpn-rotate`; nếu bật thì xoay VPN và thử lại |
-| `timeout` | dừng nếu không bật `--vpn-rotate`; nếu bật thì xoay VPN và thử lại |
-| `context` | dừng, dùng `/compact` hoặc model context lớn hơn |
+| `free_limit` (Free usage limit reached) | rotate the VPN repeatedly when `--vpn-rotate` is on; keep the model, stop when it answers or attempts run out |
+| `quota` (usage limit, exhausted, billing...) | fall back if no tool call has happened |
+| `unavailable` (model not found/no-route) | fall back if no tool call has happened |
+| `rate` (429) | no fallback by default; enable `OCX_RUN_FALLBACK_ON_RATE_LIMIT=1` if desired |
+| `auth` | stop; check `opencode auth list` / `/connect` |
+| `network` | stop unless `--vpn-rotate` is on; if on, rotate and retry |
+| `timeout` | stop unless `--vpn-rotate` is on; if on, rotate and retry |
+| `context` | stop; use `/compact` or a model with a larger context |
 
-### 6.4 Giới hạn hiện tại
+### 6.4 Current limitations
 
-- Xoay VPN là **opt-in**, chỉ chạy khi bật `--vpn-rotate` hoặc
-  `OCX_RUN_VPN_ON_FREE_LIMIT=1`; áp dụng cho free usage limit, timeout và lỗi
-  mạng trước khi có tool call. Không đảm bảo quota tài khoản được làm mới.
-- Xoay VPN lặp lại có thể mất thời gian. Dùng `--vpn-rotate-max`,
-  `--vpn-timeout`, `--run-timeout` để giới hạn; `Ctrl-C` để dừng ngay.
-- Nếu có OpenVPN không do `ocx` quản lý, `ocx` dừng trước khi xoay để tránh
-  chồng tunnel; hãy tắt VPN đó trước.
-- Không tự phát hiện quota **bên trong TUI đang chạy**. Bạn dùng
-  `ocx model next` từ terminal khác, hoặc `/models` trong TUI.
-- Không tự replay prompt đã có tool call.
-- Không đọc được số quota còn lại; hầu hết provider không có API chuẩn.
-- `ocx start` tạo session mới; không resume session cũ.
+- VPN rotation is **opt-in**, only active with `--vpn-rotate` or
+  `OCX_RUN_VPN_ON_FREE_LIMIT=1`; it applies to free usage limits, timeouts, and
+  network errors before any tool call. It does not guarantee that account quota
+  is refreshed.
+- Repeated rotation can take time. Use `--vpn-rotate-max`, `--vpn-timeout`, and
+  `--run-timeout` to bound it; `Ctrl-C` stops immediately.
+- If an OpenVPN instance not managed by `ocx` is running, `ocx` stops before
+  rotating to avoid stacked tunnels; shut that VPN down first.
+- It cannot detect quota **inside a running TUI**. Use `ocx model next` from
+  another terminal, or `/models` in the TUI.
+- It never replays a prompt that already produced a tool call.
+- It cannot read remaining quota; most providers expose no standard API.
+- `ocx start` creates a new session; it does not resume an old one.
 
 ---
 
-## 7. Ngoài VPN Gate + OpenVPN
+## 7. Beyond VPN Gate + OpenVPN
 
-`ocx` hiện hỗ trợ thêm **WireGuard**. Ngoài ra có thể cân nhắc:
+`ocx` also supports **WireGuard**. Other options worth considering:
 
-| Cách | Ưu điểm | Lưu ý |
+| Approach | Pros | Notes |
 | --- | --- | --- |
-| WireGuard (`wg-quick`) | nhẹ, nhanh, ổn định hơn OpenVPN | cần file `.conf`; `ocx` đã hỗ trợ |
-| ProtonVPN/Windscribe/Mullvad WireGuard | server ổn định hơn VPN Gate | tài khoản/giới hạn riêng; chỉ dùng theo điều khoản |
-| Cloudflare WARP (`warp-cli`) | dễ dùng, miễn phí | không có nhiều profile/region; có thể tích hợp sau |
-| Tailscale exit node | dùng thiết bị/VPS của bạn | cần thiết bị làm exit node |
-| VPS tự dựng WireGuard/OpenVPN | kiểm soát IP, độ ổn định cao | tốn chi phí, cần quản trị |
-| SSH SOCKS5 (`ssh -D`) | nhanh để đổi egress cho một số lệnh | không phải VPN toàn cục; cần cấu hình proxy |
-| HTTP/SOCKS5 proxy | linh hoạt cho HTTP client | OpenCode/provider có thể không tôn trọng proxy |
+| WireGuard (`wg-quick`) | light, fast, more stable than OpenVPN | needs a `.conf` file; already supported by `ocx` |
+| ProtonVPN/Windscribe/Mullvad WireGuard | more stable servers than VPN Gate | own account/limits; follow their terms |
+| Cloudflare WARP (`warp-cli`) | easy, free | few profiles/regions; could be integrated later |
+| Tailscale exit node | uses your own device/VPS | needs a device acting as exit node |
+| Self-hosted WireGuard/OpenVPN VPS | controlled IP, high stability | costs money, needs administration |
+| SSH SOCKS5 (`ssh -D`) | quick per-command egress change | not a global VPN; requires proxy configuration |
+| HTTP/SOCKS5 proxy | flexible for HTTP clients | OpenCode/providers may ignore proxies |
 
-VPN Gate phù hợp để thử nhanh, nhưng không nên xem là hạ tầng ổn định. Nếu cần
-kết nối lâu dài, WireGuard tới VPS hoặc nhà cung cấp trả phí đáng tin cậy hơn.
+VPN Gate is fine for quick experiments but should not be treated as stable
+infrastructure. For long-lived connections, WireGuard to a VPS or a reputable
+paid provider is a better choice.
 
 ---
 
-## 8. Cấu hình `ocx.conf`
+## 8. `ocx.conf` configuration
 
 ```bash
 nano ~/.config/ocx/ocx.conf
 ```
 
-Các biến chính:
+Main variables:
 
 ```bash
 OCX_CONNECT_TIMEOUT=60
 OCX_IP_TIMEOUT=30
 OCX_SUDO=ask                 # ask | none
 OCX_FAILOVER=1
-OCX_CHECK_UNMANAGED_VPN=1     # chặn nối nếu có OpenVPN ngoài ocx
+OCX_CHECK_UNMANAGED_VPN=1     # block connect if an external OpenVPN is running
 OCX_REQUIRE_IP_CHANGE=0
 OCX_MODELS_CACHE_TTL=300
 OCX_RUN_FALLBACK_ON_RATE_LIMIT=0
 OCX_RUN_VPN_ON_FREE_LIMIT=0
 OCX_RUN_VPN_REGION=""
-OCX_RUN_VPN_MAX=20             # 0 = không giới hạn
-OCX_RUN_VPN_TIMEOUT=30         # timeout mỗi lần kết nối/kiểm tra IP
-OCX_RUN_TIMEOUT=180            # timeout mỗi lần gọi OpenCode; 0 = tắt
-OCX_VPN_FAIL_TTL=86400         # bỏ qua profile lỗi trong 24h; 0 = giữ đến khi reset
+OCX_RUN_VPN_MAX=20             # 0 = unlimited
+OCX_RUN_VPN_TIMEOUT=30         # per connect/IP-check timeout
+OCX_RUN_TIMEOUT=180            # per OpenCode call timeout; 0 = off
+OCX_VPN_FAIL_TTL=86400         # skip failing profiles for 24h; 0 = keep until reset
 ```
 
-- `OCX_SUDO=none` chỉ dùng khi bạn đã cấu hình quyền phù hợp (ví dụ chạy bằng
-  root); mặc định `ask` sẽ gọi `sudo`.
-- `OCX_MODELS_CACHE_TTL` là thời gian cache `opencode models`.
-- `OCX_RUN_VPN_ON_FREE_LIMIT=1` bật tự xoay VPN khi `ocx run` gặp free usage
-  limit/timeout/lỗi mạng; `OCX_RUN_VPN_REGION` để trống nghĩa là giữ region
-  hiện tại.
-- `OCX_RUN_VPN_MAX`, `OCX_RUN_VPN_TIMEOUT`, `OCX_RUN_TIMEOUT` giới hạn số lần
-  xoay và thời gian chờ; có thể override bằng cờ dòng lệnh.
-- `OCX_VPN_FAIL_TTL` là thời gian bỏ qua profile bị lỗi kết nối; đặt `0` nếu
-  muốn giữ mark fail cho đến khi `ocx vpn reset --fail` hoặc kết nối lại thành
-  công.
-- Xoay VPN không làm mới quota tài khoản; đây chỉ là thay đổi egress IP. Nếu
-  provider vẫn báo hết quota, hãy dùng model/provider khác mà bạn có quyền.
+- `OCX_SUDO=none` is only for setups where permissions are configured
+  appropriately (e.g. running as root); the default `ask` invokes `sudo`.
+- `OCX_MODELS_CACHE_TTL` is how long `opencode models` is cached.
+- `OCX_RUN_VPN_ON_FREE_LIMIT=1` enables automatic VPN rotation when `ocx run`
+  hits a free usage limit/timeout/network error; an empty `OCX_RUN_VPN_REGION`
+  means keep the current region.
+- `OCX_RUN_VPN_MAX`, `OCX_RUN_VPN_TIMEOUT`, and `OCX_RUN_TIMEOUT` bound the
+  number of rotations and the wait times; command-line flags override them.
+- `OCX_VPN_FAIL_TTL` is how long connection-failed profiles are skipped; set it
+  to `0` to keep fail marks until `ocx vpn reset --fail` or a successful
+  reconnect.
+- Rotating the VPN does not refresh account quota; it only changes the egress
+  IP. If the provider still reports the quota as exhausted, use another
+  model/provider you are entitled to.
 
 ---
 
@@ -572,33 +591,34 @@ sudo tail -n 100 ~/.cache/ocx/log/openvpn-*.log
 curl -4 https://api.ipify.org
 ```
 
-### VPN không lên
+### The VPN does not come up
 
-- Kiểm tra file `.ovpn` còn hạn/đúng server không.
-- VPN Gate server có thể offline; thử `ocx vpn next`.
-- Xem log OpenVPN.
-- Kiểm tra DNS/route; một số profile không route IPv4.
-- `ocx vpn status` báo IP không đổi: có thể tunnel chưa route traffic.
+- Check that the `.ovpn` file is still valid and points to the right server.
+- VPN Gate servers can be offline; try `ocx vpn next`.
+- Read the OpenVPN log.
+- Check DNS/routes; some profiles do not route IPv4.
+- If `ocx vpn status` reports an unchanged IP, the tunnel may not be routing
+  traffic.
 
-### Báo “phát hiện OpenVPN không do ocx quản lý”
+### "Detected an OpenVPN not managed by ocx"
 
-Bạn đang có một phiên OpenVPN chạy ngoài `ocx` (ví dụ lệnh `sudo openvpn
---config ...` cũ). `ocx` không tự kill process này để tránh phá kết nối bạn
-đang dùng. Hãy dừng nó trước:
+You have an OpenVPN session running outside `ocx` (e.g. an old
+`sudo openvpn --config ...` command). `ocx` will not kill it, to avoid breaking
+a connection you rely on. Stop it first:
 
-- quay lại terminal đang chạy OpenVPN và nhấn `Ctrl-C`, hoặc
-- `sudo kill <PID>` (xem PID bằng `ps -eo pid,args | grep '[o]penvpn'`).
+- go back to the terminal running OpenVPN and press `Ctrl-C`, or
+- `sudo kill <PID>` (find the PID with `ps -eo pid,args | grep '[o]penvpn'`).
 
-Sau đó chạy lại `ocx vpn next`. Nếu muốn tắt các tunnel do chính `ocx` tạo:
+Then run `ocx vpn next` again. To tear down tunnels created by `ocx` itself, use
 `ocx vpn disconnect --all`.
 
-### `ocx vpn use` không xác nhận được IP
+### `ocx vpn use` cannot confirm the IP
 
-- Endpoint kiểm tra IP bị chặn; thử đổi `OCX_HEALTH_URLS`.
-- VPN chậm; tăng `OCX_CONNECT_TIMEOUT`/`OCX_IP_TIMEOUT`.
-- Profile chỉ route IPv6 hoặc split-tunnel.
+- The IP-check endpoints are blocked; try changing `OCX_HEALTH_URLS`.
+- The VPN is slow; increase `OCX_CONNECT_TIMEOUT`/`OCX_IP_TIMEOUT`.
+- The profile only routes IPv6 or is split-tunnel.
 
-### OpenCode API không phản hồi
+### The OpenCode API does not respond
 
 ```bash
 opencode service status
@@ -606,64 +626,66 @@ opencode service restart
 opencode api get /api/info
 ```
 
-### Model không có trong catalog
+### The model is not in the catalog
 
 ```bash
 opencode models
 ocx models --refresh
 ```
 
-Sửa `~/.config/ocx/models.conf` theo ID thực tế.
+Update `~/.config/ocx/models.conf` with the real IDs.
 
-### `ocx model switch` báo nhiều phiên
+### `ocx model switch` reports multiple sessions
 
 ```bash
 ocx model switch glm --session ses_xxx
 ```
 
-### `ocx start` mở TUI mặc định
+### `ocx start` opens the default TUI
 
-API tạo session thất bại. Kiểm tra `opencode service` và thử lại; hoặc dùng
-`/models` trong TUI.
-
----
-
-## 10. Bảo mật
-
-- File `.ovpn`/`.conf` thường chứa certificate/private key. Giữ quyền `600`.
-- Không chạy script lạ bằng `sudo`.
-- `ocx` dùng `sudo openvpn`/`wg-quick` vì cần quyền tạo tunnel/route.
-- `ocx` không chạy `pkill openvpn`; chỉ tác động process có pidfile/state hoặc
-  profile nằm trong thư mục cấu hình của nó.
-- Không đưa API key vào `models.conf`; OpenCode quản lý credential riêng.
+Creating the session through the API failed. Check `opencode service` and retry,
+or use `/models` in the TUI.
 
 ---
 
-## 11. Gỡ cài đặt
+## 10. Security
+
+- `.ovpn`/`.conf` files usually contain certificates/private keys. Keep them
+  `600`.
+- Do not run unknown scripts with `sudo`.
+- `ocx` uses `sudo openvpn`/`wg-quick` because creating tunnels/routes requires
+  privileges.
+- `ocx` never runs `pkill openvpn`; it only affects processes with its own
+  pidfile/state, or profiles inside its config directory.
+- Never put API keys in `models.conf`; OpenCode manages credentials separately.
+
+---
+
+## 11. Uninstalling
 
 ```bash
-./uninstall.sh              # giữ cấu hình/profile
-./uninstall.sh --purge      # xoá cả cấu hình, cache, state, profile
+./uninstall.sh              # keep configuration/profiles
+./uninstall.sh --purge      # also remove config, cache, state, profiles
 ```
 
 ---
 
-## 12. Test
+## 12. Tests
 
-Bộ test dùng mock, không gọi mạng thật, không đốt quota:
+The suite uses mocks; it does not touch the network or burn quota:
 
 ```bash
 ./tests/run-tests.sh
 ```
 
-Kết quả hiện tại: 130 pass, 0 fail.
+Current result: 130 pass, 0 fail.
 
 ---
 
-## 13. Lệnh nhanh
+## 13. Quick reference
 
 ```bash
-# Cài
+# Install
 ./install.sh
 
 # VPN
@@ -677,7 +699,7 @@ ocx vpn status
 ocx vpn log 100
 ocx vpn disconnect
 
-# Model
+# Models
 ocx models
 ocx start
 ocx start glm
@@ -688,6 +710,101 @@ ocx run --fallback --vpn-rotate "your prompt"
 ocx run --vpn-rotate --vpn-rotate-max 50 --vpn-timeout 20 "your prompt"
 ocx run --fallback --vpn-rotate --vpn-region jp "your prompt"
 
-# Chẩn đoán
+# Diagnostics
 ocx doctor
 ```
+
+---
+
+## 14. License
+
+This project is released under the **GNU General Public License v3.0**
+(GPL-3.0).
+
+- Full license text: [`LICENSE`](LICENSE)
+- Canonical page at the FSF: <https://www.gnu.org/licenses/gpl-3.0.html>
+- Standalone text (easier to read, no "how to apply" appendix):
+  <https://www.gnu.org/licenses/gpl-3.0-standalone.html>
+- Why not the LGPL: <https://www.gnu.org/licenses/why-not-lgpl.html>
+
+Rights and obligations at a glance:
+
+| Right | Condition |
+| --- | --- |
+| Run the program for any purpose | Unrestricted |
+| Study and modify the source | Must publish source when distributing modified versions |
+| Distribute copies | Include the license, keep copyright notices, add no restrictions |
+| Distribute modified versions | Mark changes, license the whole derivative work under GPL-3.0 |
+| Sell copies/support | Allowed, as long as the freedoms above are preserved |
+
+Main obligations:
+
+- Provide the **Corresponding Source** to anyone who receives a compiled or
+  packaged version.
+- Keep copyright notices and **add no further restrictions** on recipients'
+  rights.
+- If you modify the code, **state that you changed it** and do not misrepresent
+  the original author.
+- Do not sublicense under a different license.
+- The program is provided **"AS IS"**, without warranty; the authors are not
+  liable for damages (sections 15–17).
+
+To apply it to your own code, see *How to Apply These Terms* at the end of
+[`LICENSE`](LICENSE), or use this short NOTICE template:
+
+```text
+ocx-bash-cli — OpenCode eXtended CLI
+Copyright (C) 2026 dinhvanit
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+```
+
+---
+
+## 15. Useful links
+
+**OpenCode**
+
+- Website: <https://opencode.ai>
+- Docs: <https://opencode.ai/docs>
+- Models/pricing: <https://opencode.ai/docs/models>
+- OpenCode Go (paid plan): <https://opencode.ai/go>
+- Source code: <https://github.com/sst/opencode>
+- Discord: <https://opencode.ai/discord>
+
+**VPNs and tooling**
+
+- VPN Gate (free server list): <https://www.vpngate.net>
+- OpenVPN: <https://openvpn.net/community/>
+- WireGuard: <https://www.wireguard.com>
+- `wg-quick`: <https://man7.org/linux/man-pages/man8/wg-quick.8.html>
+- Cloudflare WARP: <https://developers.cloudflare.com/warp-client/>
+- Tailscale exit nodes: <https://tailscale.com/kb/1103/exit-nodes>
+- ProtonVPN: <https://protonvpn.com>
+- Mullvad: <https://mullvad.net>
+- Windscribe: <https://windscribe.com>
+
+**This project**
+
+- Source: <https://github.com/dinhvanit/ocx-bash-cli>
+- Issues: <https://github.com/dinhvanit/ocx-bash-cli/issues>
+- Discussions: <https://github.com/dinhvanit/ocx-bash-cli/discussions>
+
+**License and Bash references**
+
+- GNU GPL v3.0: <https://www.gnu.org/licenses/gpl-3.0.html>
+- GPL FAQ: <https://www.gnu.org/licenses/gpl-faq.html>
+- Bash Reference Manual: <https://www.gnu.org/software/bash/manual/>
+- ShellCheck: <https://www.shellcheck.net>
+- jq manual: <https://jqlang.github.io/jq/manual/>
